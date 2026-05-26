@@ -1,0 +1,11 @@
+name: certifai-experiments
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pytorch
+  - numpy
+  - matplotlib
+  - tqdm
+  - pip

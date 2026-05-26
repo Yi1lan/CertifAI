@@ -1,0 +1,66 @@
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local environment files
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Node / frontend
+node_modules/
+.npm/
+.pnpm-store/
+dist/
+build/
+coverage/
+
+# Tooling caches
+.cache/
+.matplotlib-cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Local files
+8009_The_Pick_to_Learn_Algorit_Supplementary Material/
+GREATS-master/
+certifai_experiments/
+results_old_version/
+certifai_p2l_greats_experiment_plan.md
+certifai_p2l_algorithm_and_experiments.md
