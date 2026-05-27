@@ -3,7 +3,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .plotting import plot_boundary, plot_es_budget_boundary, plot_es_budget_noise, plot_es_trace, plot_noise
+from .plotting import (
+    plot_boundary,
+    plot_es_budget_boundary,
+    plot_es_budget_noise,
+    plot_es_trace,
+    plot_generalization_bounds,
+    plot_noise,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -13,7 +20,7 @@ def parse_args() -> argparse.Namespace:
         "--kind",
         type=str,
         required=True,
-        choices=["boundary", "noise", "es_trace", "es_budget_boundary", "es_budget_noise"],
+        choices=["boundary", "noise", "es_trace", "es_budget_boundary", "es_budget_noise", "generalization_bounds"],
     )
     return parser.parse_args()
 
@@ -31,6 +38,8 @@ def main() -> None:
         plot_es_budget_boundary(results_path, plots_dir)
     elif args.kind == "es_budget_noise":
         plot_es_budget_noise(results_path, plots_dir)
+    elif args.kind == "generalization_bounds":
+        plot_generalization_bounds(results_path, plots_dir)
     else:
         plot_noise(results_path, plots_dir)
 

@@ -62,6 +62,44 @@ setting `--dataset-name mnist` or `--dataset-name cifar10`. They require
 computed with a trained Gaussian posterior over the classifier head by default
 (`--pac-bayes-scope head`) using the pretraining checkpoint as the prior.
 
+## MNIST Generalization-Bound Comparison
+
+This runs the binary MNIST setup and compares clean test risk against four
+bound curves: the P2L compression certificate, PAC-Bayes, the anytime
+self-selected-data bound of Rodemann and Bailie, and the clipped-Gaussian
+adaptive-data-analysis bound of Marchant and Rubinstein. The external-paper
+bounds are recorded with their component constants because they require
+problem-specific Lipschitz, dimension, diameter, query-count, and privacy
+calibration choices.
+
+```bash
+PYTHONPATH=PU-P2L python -m pu_p2l.run_generalization_bounds \
+  --output-dir results/genearlization_bound/mnist \
+  --dataset-name mnist \
+  --download-data \
+  --device cpu \
+  --seeds 0 1 2 3 4 \
+  --noise-rates 0.0 0.4 \
+  --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
+  --methods PU-G \
+  --n-train 3000 \
+  --n-test 10000 \
+  --pac-bayes-samples 50
+```
+
+Outputs:
+
+- `results.csv`: one row per seed, noise, pretrain fraction, and method.
+- `summary.csv`: grouped means and standard errors.
+- `plots/generalization_bounds_vs_pretrain_noise_0.png`
+- `plots/generalization_bounds_vs_pretrain_noise_0p4.png`
+
+The default self-selected-data instantiation uses the MNIST input-space
+diameter and `d = 785` (784 pixels plus the binary label coordinate), so it is
+expected to be conservative. Override `--ssd-dimension`,
+`--ssd-data-diameter`, or `--ssd-loss-lipschitz` only when those constants are
+part of the comparison protocol.
+
 ## Boundary Experiment
 
 This runs the hard synthetic setting at `noise=0.0` and `noise=0.4`, plotting

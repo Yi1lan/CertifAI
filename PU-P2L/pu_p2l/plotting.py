@@ -27,6 +27,13 @@ COLORS = {
 METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
 CERTIFIED_METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G"]
 BOUND_METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
+GENERALIZATION_BOUND_CURVES = [
+    ("test_error", "risk", "-", 1.8, 0.16),
+    ("certified_bound", "P2L", "--", 1.7, 0.10),
+    ("pac_bayes_bound", "PAC-Bayes", ":", 1.8, 0.08),
+    ("self_selected_bound", "self-selected", "-.", 1.5, 0.08),
+    ("ada_bound", "ADA growing", (0, (3, 1, 1, 1, 1, 1)), 1.5, 0.08),
+]
 
 
 def should_plot_pac_bayes(rows: list[dict[str, str]]) -> bool:
@@ -206,6 +213,56 @@ def plot_boundary(results_path: Path, plots_dir: Path) -> None:
             "Runtime vs Pretrain Fraction",
             plots_dir / f"runtime_vs_pretrain_noise_{suffix}.png",
         )
+
+
+def plot_generalization_bounds(results_path: Path, plots_dir: Path) -> None:
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    rows = read_csv(results_path)
+    methods = [method for method in METHOD_ORDER if any(row["method"] == method for row in rows)]
+    noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
+
+    for noise_rate in noise_rates:
+        suffix = format_float_for_filename(noise_rate)
+        plot_generalization_bound_and_risk(
+            rows,
+            methods,
+            noise_rate,
+            plots_dir / f"generalization_bounds_vs_pretrain_noise_{suffix}.png",
+        )
+
+
+def plot_generalization_bound_and_risk(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    noise_rate: float,
+    path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9.6, 5.6))
+    for method in methods:
+        for metric, label, linestyle, linewidth, alpha in GENERALIZATION_BOUND_CURVES:
+            xs, means, ses = grouped_curve(rows, method, noise_rate, metric)
+            if not xs:
+                continue
+            plot_mean_band(
+                ax,
+                xs,
+                means,
+                ses,
+                method,
+                label=f"{method} {label}",
+                linestyle=linestyle,
+                linewidth=linewidth,
+                alpha=alpha,
+            )
+    ax.set_xlabel("Pretrain fraction")
+    ax.set_ylabel("Clean test risk / generalization bound")
+    ax.set_title(f"MNIST Generalization Bounds vs Pretrain Fraction (noise={noise_rate:g})")
+    ax.set_ylim(-0.02, 1.05)
+    ax.grid(alpha=0.25)
+    ax.legend(fontsize=7.5, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
 
 
 def plot_certified_bound_and_risk(
@@ -705,6 +762,7 @@ def plot_mean_band(
     method: str,
     label: str | None = None,
     linestyle: str = "-",
+    linewidth: float = 2.0,
     alpha: float = 0.18,
 ) -> None:
     x_arr = np.asarray(xs, dtype=np.float64)
@@ -716,7 +774,7 @@ def plot_mean_band(
         mean_arr,
         marker="o",
         markersize=4,
-        linewidth=2.0,
+        linewidth=linewidth,
         color=color,
         linestyle=linestyle,
         label=label or method,
