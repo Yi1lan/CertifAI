@@ -13,6 +13,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .data import pac_bayes_enabled_for_dataset
 from .io_utils import read_csv, to_float
 
 
@@ -25,6 +26,14 @@ COLORS = {
 }
 METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
 CERTIFIED_METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G"]
+BOUND_METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
+
+
+def should_plot_pac_bayes(rows: list[dict[str, str]]) -> bool:
+    dataset_names = {row.get("dataset", "").strip() for row in rows if row.get("dataset", "").strip()}
+    if dataset_names and not any(pac_bayes_enabled_for_dataset(name) for name in dataset_names):
+        return False
+    return any(not np.isnan(to_float(row, "pac_bayes_bound")) for row in rows)
 
 
 def format_float_for_filename(value: float) -> str:
@@ -173,10 +182,9 @@ def plot_boundary(results_path: Path, plots_dir: Path) -> None:
 
     for noise_rate in noise_rates:
         suffix = format_float_for_filename(noise_rate)
-        certified_methods = [method for method in CERTIFIED_METHOD_ORDER if method in methods]
         plot_certified_bound_and_risk(
             rows,
-            certified_methods,
+            methods,
             noise_rate,
             plots_dir / f"certified_bound_and_risk_vs_pretrain_noise_{suffix}.png",
         )
@@ -207,6 +215,7 @@ def plot_certified_bound_and_risk(
     path: Path,
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
+    show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
         xs, means, ses = grouped_curve(rows, method, noise_rate, "test_error")
         if xs:
@@ -233,9 +242,27 @@ def plot_certified_bound_and_risk(
                 linestyle="--",
                 alpha=0.10,
             )
+
+        xs, means, ses = grouped_curve(rows, method, noise_rate, "pac_bayes_bound")
+        if show_pac_bayes and xs:
+            plot_mean_band(
+                ax,
+                xs,
+                means,
+                ses,
+                method,
+                label=f"{method} PAC-Bayes",
+                linestyle=":",
+                alpha=0.08,
+            )
     ax.set_xlabel("Pretrain fraction")
-    ax.set_ylabel("Clean test risk / certified bound")
-    ax.set_title(f"Certified Bound and Clean Test Risk vs Pretrain Fraction (noise={noise_rate:g})")
+    ax.set_ylabel("Clean test risk / generalization bound" if show_pac_bayes else "Clean test risk / P2L bound")
+    title = (
+        "P2L/PAC-Bayes Bounds and Clean Test Risk"
+        if show_pac_bayes
+        else "P2L Bound and Clean Test Risk"
+    )
+    ax.set_title(f"{title} vs Pretrain Fraction (noise={noise_rate:g})")
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
@@ -271,7 +298,7 @@ def plot_metric(
 def plot_es_budget_boundary(results_path: Path, plots_dir: Path) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     rows = read_csv(results_path)
-    methods = [method for method in CERTIFIED_METHOD_ORDER if any(row["method"] == method for row in rows)]
+    methods = [method for method in BOUND_METHOD_ORDER if any(row["method"] == method for row in rows)]
     noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
     budgets = sorted({int(to_float(row, "es_budget")) for row in rows})
 
@@ -295,6 +322,7 @@ def plot_es_budget_bound_and_risk_vs_pretrain(
     path: Path,
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
+    show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
         xs, means, ses = grouped_budget_pretrain_curve(rows, method, noise_rate, es_budget, "test_error")
         if xs:
@@ -321,9 +349,31 @@ def plot_es_budget_bound_and_risk_vs_pretrain(
                 linestyle="--",
                 alpha=0.10,
             )
+
+        xs, means, ses = grouped_budget_pretrain_curve(rows, method, noise_rate, es_budget, "pac_bayes_bound")
+        if show_pac_bayes and xs:
+            plot_mean_band(
+                ax,
+                xs,
+                means,
+                ses,
+                method,
+                label=f"{method} PAC-Bayes",
+                linestyle=":",
+                alpha=0.08,
+            )
     ax.set_xlabel("Pretrain fraction")
-    ax.set_ylabel("Clean test risk / ES certified bound")
-    ax.set_title(f"ES Certified Bound and Clean Test Risk vs Pretrain Fraction (noise={noise_rate:g}, ES={es_budget})")
+    ax.set_ylabel(
+        "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+    )
+    title = (
+        "ES P2L/PAC-Bayes Bounds and Clean Test Risk"
+        if show_pac_bayes
+        else "ES P2L Bound and Clean Test Risk"
+    )
+    ax.set_title(
+        f"{title} vs Pretrain Fraction (noise={noise_rate:g}, ES={es_budget})"
+    )
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
     fig.tight_layout()
@@ -334,7 +384,7 @@ def plot_es_budget_bound_and_risk_vs_pretrain(
 def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     rows = read_csv(results_path)
-    methods = [method for method in CERTIFIED_METHOD_ORDER if any(row["method"] == method for row in rows)]
+    methods = [method for method in BOUND_METHOD_ORDER if any(row["method"] == method for row in rows)]
     noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
     pretrain_fractions = sorted({to_float(row, "pretrain_fraction") for row in rows})
 
@@ -370,6 +420,7 @@ def plot_step_bound_and_risk(
     max_step: float | None = None,
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
+    show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
         xs, means, ses = grouped_step_curve(
             rows, method, noise_rate, pretrain_fraction, "test_error", max_step=max_step
@@ -400,14 +451,35 @@ def plot_step_bound_and_risk(
                 linestyle="--",
                 alpha=0.10,
             )
+
+        xs, means, ses = grouped_step_curve(
+            rows, method, noise_rate, pretrain_fraction, "pac_bayes_bound", max_step=max_step
+        )
+        if show_pac_bayes and xs:
+            plot_mean_band(
+                ax,
+                xs,
+                means,
+                ses,
+                method,
+                label=f"{method} PAC-Bayes",
+                linestyle=":",
+                alpha=0.08,
+            )
     if max_step is not None:
         ax.set_xlim(left=0, right=max_step)
     ax.set_xlabel("Selection step")
-    ax.set_ylabel("Clean test risk / ES certified bound")
+    ax.set_ylabel(
+        "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+    )
     window_label = f", first {max_step:g} steps" if max_step is not None else ""
+    title = (
+        "ES P2L/PAC-Bayes Bounds and Clean Test Risk"
+        if show_pac_bayes
+        else "ES P2L Bound and Clean Test Risk"
+    )
     ax.set_title(
-        f"ES Certified Bound and Clean Test Risk vs Step{window_label} "
-        f"(noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
+        f"{title} vs Step{window_label} (noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
     )
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
@@ -419,7 +491,7 @@ def plot_step_bound_and_risk(
 def plot_es_budget_noise(results_path: Path, plots_dir: Path) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     rows = read_csv(results_path)
-    methods = [method for method in CERTIFIED_METHOD_ORDER if any(row["method"] == method for row in rows)]
+    methods = [method for method in BOUND_METHOD_ORDER if any(row["method"] == method for row in rows)]
     budgets = sorted({int(to_float(row, "es_budget")) for row in rows})
     pretrain_fractions = sorted({to_float(row, "pretrain_fraction") for row in rows})
 
@@ -446,6 +518,47 @@ def plot_es_budget_noise(results_path: Path, plots_dir: Path) -> None:
                 f"Clean Test Risk vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
                 plots_dir / f"es_budget_test_risk_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
             )
+            plot_es_budget_bounds_vs_noise(
+                rows,
+                methods,
+                budget,
+                pretrain_fraction,
+                plots_dir / f"es_budget_bounds_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
+            )
+
+
+def plot_es_budget_bounds_vs_noise(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    es_budget: int,
+    pretrain_fraction: float,
+    path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9, 5.2))
+    show_pac_bayes = should_plot_pac_bayes(rows)
+    for method in methods:
+        xs, means, ses = grouped_budget_noise_curve(rows, method, es_budget, pretrain_fraction, "test_error")
+        if xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} risk", linestyle="-", alpha=0.16)
+
+        xs, means, ses = grouped_budget_noise_curve(rows, method, es_budget, pretrain_fraction, "certified_bound")
+        if xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} P2L", linestyle="--", alpha=0.10)
+
+        xs, means, ses = grouped_budget_noise_curve(rows, method, es_budget, pretrain_fraction, "pac_bayes_bound")
+        if show_pac_bayes and xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} PAC-Bayes", linestyle=":", alpha=0.08)
+    ax.set_xlabel("Label-noise rate")
+    ax.set_ylabel(
+        "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+    )
+    title = "ES P2L/PAC-Bayes Bounds" if show_pac_bayes else "ES P2L Bound and Clean Test Risk"
+    ax.set_title(f"{title} vs Label-Noise Rate (ES={es_budget}, pretrain={pretrain_fraction:g})")
+    ax.grid(alpha=0.25)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
 
 
 def plot_es_budget_noise_metric(
@@ -495,7 +608,42 @@ def plot_noise(results_path: Path, plots_dir: Path) -> None:
         "Compression Set Size vs Label-Noise Rate",
         plots_dir / "compression_size_vs_noise.png",
     )
+    plot_noise_bounds_vs_noise(rows, methods, plots_dir / "bounds_vs_noise.png")
     plot_redundancy_diagnostics(rows, methods, plots_dir / "redundancy_diagnostics_vs_noise.png")
+
+
+def plot_noise_bounds_vs_noise(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9, 5.2))
+    show_pac_bayes = should_plot_pac_bayes(rows)
+    for method in methods:
+        xs, means, ses = grouped_noise_curve(rows, method, "test_error")
+        if xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} risk", linestyle="-", alpha=0.16)
+
+        xs, means, ses = grouped_noise_curve(rows, method, "certified_bound")
+        if xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} P2L", linestyle="--", alpha=0.10)
+
+        xs, means, ses = grouped_noise_curve(rows, method, "pac_bayes_bound")
+        if show_pac_bayes and xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} PAC-Bayes", linestyle=":", alpha=0.08)
+    ax.set_xlabel("Label-noise rate")
+    ax.set_ylabel("Clean test risk / generalization bound" if show_pac_bayes else "Clean test risk / P2L bound")
+    title = (
+        "P2L/PAC-Bayes Bounds and Clean Test Risk"
+        if show_pac_bayes
+        else "P2L Bound and Clean Test Risk"
+    )
+    ax.set_title(f"{title} vs Label-Noise Rate")
+    ax.grid(alpha=0.25)
+    ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
 
 
 def plot_noise_metric(

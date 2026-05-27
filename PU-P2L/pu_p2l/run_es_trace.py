@@ -7,12 +7,12 @@ from typing import Any
 
 import torch
 
-from .data import make_pretrain_split, make_redundancy_dataset
+from .data import make_pretrain_split
 from .io_utils import summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_es_trace
-from .runner import CERTIFIED_METHODS, run_p2l_trace
-from .run_boundary import build_config
+from .runner import METHODS, run_p2l_trace
+from .run_boundary import add_pac_bayes_args, build_config, make_dataset_from_args
 
 try:
     from tqdm import tqdm
@@ -20,9 +20,10 @@ except ImportError:  # pragma: no cover
     tqdm = None
 
 
-TRACE_METHODS = ["MaxLoss", "PU-C", "PU-F", "PU-G"]
+TRACE_METHODS = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
 TRACE_FIELDS = [
     "method",
+    "dataset",
     "seed",
     "noise_rate",
     "pretrain_fraction",
@@ -34,6 +35,10 @@ TRACE_FIELDS = [
     "effective_compression_size",
     "certified_bound",
     "test_error",
+    "pac_bayes_bound",
+    "pac_bayes_empirical_risk",
+    "pac_bayes_mc_upper",
+    "pac_bayes_kl",
     "runtime_sec",
     "stop_reached",
     "hit_limit",
@@ -46,7 +51,10 @@ TRACE_FIELDS = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run PU-P2L early-stop trace experiments.")
-    parser.add_argument("--output-dir", type=str, default="results/pu_p2l_es_trace_hard")
+    parser.add_argument("--output-dir", type=str, default="results/synthetic_redundancy_hard/es_trace")
+    parser.add_argument("--dataset-name", type=str, default="synthetic_redundancy_hard")
+    parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument("--download-data", action="store_true")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "mps", "cuda", "auto"])
     parser.add_argument("--seeds", type=int, nargs="+", default=list(range(10)))
     parser.add_argument("--noise-rates", type=float, nargs="+", default=[0.0, 0.4])
@@ -68,18 +76,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--band-std", type=float, default=0.35)
     parser.add_argument("--duplicate-std", type=float, default=0.015)
 
+    parser.add_argument("--model-name", type=str, default="auto", choices=["auto", "small_mlp", "mnist_fcn", "cifar_resnet18"])
     parser.add_argument("--hidden-dim", type=int, default=64)
+    parser.add_argument("--dropout-prob", type=float, default=0.2)
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--inference-batch-size", type=int, default=1024)
     parser.add_argument("--pretrain-epochs", type=int, default=30)
     parser.add_argument("--pretrain-lr", type=float, default=1e-2)
     parser.add_argument("--p2l-epochs-per-iter", type=int, default=1)
     parser.add_argument("--p2l-lr", type=float, default=1e-2)
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd"])
+    parser.add_argument("--momentum", type=float, default=0.0)
+    parser.add_argument("--nesterov", action="store_true")
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=-math.log(0.5))
     parser.add_argument("--delta", type=float, default=0.035)
     parser.add_argument("--max-total-support", type=int, default=600)
     parser.add_argument("--initial-per-class", type=int, default=2)
     parser.add_argument("--greats-probe-size", type=int, default=64)
+    add_pac_bayes_args(parser, default_samples=0)
 
     parser.add_argument("--r-h", type=int, default=5)
     parser.add_argument("--r-consensus", type=int, default=10)
@@ -96,9 +111,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    unknown = sorted(set(args.methods) - CERTIFIED_METHODS)
+    unknown = sorted(set(args.methods) - set(METHODS))
     if unknown:
-        raise ValueError(f"Unknown or non-certified methods: {unknown}. Valid methods: {TRACE_METHODS}")
+        raise ValueError(f"Unknown methods: {unknown}. Valid methods: {METHODS}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -119,42 +134,36 @@ def main() -> None:
     for seed, noise_rate, pretrain_fraction, method in progress:
         key = (seed, noise_rate, pretrain_fraction)
         if key not in cache:
-            bundle = make_redundancy_dataset(
-                seed=seed,
-                n_train=args.n_train,
-                n_test=args.n_test,
-                duplicate_groups=args.duplicate_groups,
-                duplicates_per_group=args.duplicates_per_group,
-                noise_rate=noise_rate,
-                ambiguous_fraction=args.ambiguous_fraction,
-                cluster_std=args.cluster_std,
-                band_std=args.band_std,
-                duplicate_std=args.duplicate_std,
-            )
+            bundle = make_dataset_from_args(args, seed, noise_rate)
             cache[key] = make_pretrain_split(bundle, pretrain_fraction, seed)
-        rows.extend(
-            run_p2l_trace(
-                method,
-                seed,
-                noise_rate,
-                pretrain_fraction,
-                cache[key],
-                config,
-                device,
-                args.record_every,
-            )
+        trace_rows = run_p2l_trace(
+            method,
+            seed,
+            noise_rate,
+            pretrain_fraction,
+            cache[key],
+            config,
+            device,
+            args.record_every,
         )
+        for row in trace_rows:
+            row["dataset"] = args.dataset_name
+        rows.extend(trace_rows)
 
     write_csv(output_dir / "results.csv", TRACE_FIELDS, rows)
     summary = summarize(
         rows,
-        group_fields=["method", "noise_rate", "pretrain_fraction", "step"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "step"],
         numeric_fields=[
             "compression_size",
             "remaining_bad",
             "effective_compression_size",
             "certified_bound",
             "test_error",
+            "pac_bayes_bound",
+            "pac_bayes_empirical_risk",
+            "pac_bayes_mc_upper",
+            "pac_bayes_kl",
             "runtime_sec",
             "stop_reached",
             "hit_limit",

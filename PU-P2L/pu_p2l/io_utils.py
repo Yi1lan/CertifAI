@@ -12,6 +12,7 @@ import numpy as np
 
 RESULT_FIELDS = [
     "method",
+    "dataset",
     "seed",
     "noise_rate",
     "pretrain_fraction",
@@ -22,6 +23,10 @@ RESULT_FIELDS = [
     "effective_compression_size",
     "certified_bound",
     "test_error",
+    "pac_bayes_bound",
+    "pac_bayes_empirical_risk",
+    "pac_bayes_mc_upper",
+    "pac_bayes_kl",
     "runtime_sec",
     "stop_reached",
     "train_calls",

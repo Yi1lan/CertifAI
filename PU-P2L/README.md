@@ -34,6 +34,9 @@ conda env update -f environment.yml --prune
 conda activate certifai-experiments
 ```
 
+On an NVIDIA A40 server, install the CUDA-enabled PyTorch build for that server
+before running `--device cuda` if the default Conda solve gives a CPU build.
+
 Check that the core packages are visible:
 
 ```bash
@@ -43,17 +46,32 @@ python -c "import torch, numpy, matplotlib; print(torch.__version__)"
 All experiment commands below assume this Conda environment is active and use
 `PYTHONPATH=PU-P2L` so Python can import the clean `pu_p2l` package.
 
+The current dataset is recorded as `synthetic_redundancy_hard` in each CSV row,
+and the recommended output directories below are namespaced under
+`results/synthetic_redundancy_hard/`. Use a different `--dataset-name` and
+output subdirectory when adding new datasets.
+
+PAC-Bayes is disabled for `synthetic_redundancy_hard`. The current synthetic
+experiments plot clean test risk and P2L compression certificates only. A
+separate PAC-Bayes implementation can be enabled later for MNIST/CIFAR-style
+datasets where the stochastic-posterior baseline is meaningful.
+
+MNIST/CIFAR experiments are enabled through the same five entry points by
+setting `--dataset-name mnist` or `--dataset-name cifar10`. They require
+`torchvision`; `environment.yml` includes it. For image datasets, PAC-Bayes is
+computed with a trained Gaussian posterior over the classifier head by default
+(`--pac-bayes-scope head`) using the pretraining checkpoint as the prior.
+
 ## Boundary Experiment
 
 This runs the hard synthetic setting at `noise=0.0` and `noise=0.4`, plotting
-effective compression size, runtime, certified bound, and clean test risk versus
-pretrain fraction. The certified-bound plot includes only certifiable methods
-(`MaxLoss`, `PU-C`, `PU-F`, and `PU-G`); `GREATS` remains a non-certified
-reference selector.
+effective compression size, runtime, P2L bounds, and clean test risk
+versus pretrain fraction.
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.run_boundary \
-  --output-dir results/pu_p2l_clean_boundary_hard \
+  --output-dir results/synthetic_redundancy_hard/boundary \
+  --dataset-name synthetic_redundancy_hard \
   --device cpu \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.4 \
@@ -92,7 +110,8 @@ methods run without early stopping.
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.run_noise \
-  --output-dir results/pu_p2l_clean_noise_hard \
+  --output-dir results/synthetic_redundancy_hard/noise \
+  --dataset-name synthetic_redundancy_hard \
   --device cpu \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.1 0.2 0.3 0.4 \
@@ -117,6 +136,7 @@ Outputs:
 
 - `plots/test_error_vs_noise.png`
 - `plots/compression_size_vs_noise.png`
+- `plots/bounds_vs_noise.png`
 - `plots/redundancy_diagnostics_vs_noise.png`
 
 The redundancy plot contains noise-hit rate, duplicate-hit rate, and pairwise
@@ -128,16 +148,18 @@ This runs the hard synthetic setting and records the clean test risk and ES
 certificate during the selection process. At each recorded step, the certificate
 uses `|T_step| + remaining_bad_step` until Stop is reached, so intermediate
 points can be interpreted as early-stopped P2L certificates. The comparison is
-restricted to certifiable methods: `MaxLoss`, `PU-C`, `PU-F`, and `PU-G`.
+shown for `MaxLoss`, `PU-C`, `PU-F`, `PU-G`, and `GREATS`; `GREATS` appears
+as clean test risk only because it has no P2L compression certificate.
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.run_es_trace \
-  --output-dir results/pu_p2l_es_trace_hard \
+  --output-dir results/synthetic_redundancy_hard/es_trace \
+  --dataset-name synthetic_redundancy_hard \
   --device cpu \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.4 \
   --pretrain-fractions 0.0 \
-  --methods MaxLoss PU-C PU-F PU-G \
+  --methods MaxLoss PU-C PU-F PU-G GREATS \
   --record-every 5 \
   --n-train 3000 \
   --n-test 10000 \
@@ -165,18 +187,19 @@ Outputs:
 
 This evaluates early-stopped certificates at fixed ES budgets. For each budget,
 the certificate uses `effective_compression_size = |T_ES| + remaining_bad_ES`.
-Risk is plotted as a solid line and the ES certificate as a dashed line with the
-same method color.
+Risk is plotted as a solid line and the ES P2L certificate as a dashed line
+with the same method color.
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_boundary \
-  --output-dir results/pu_p2l_es_budget_boundary_hard \
+  --output-dir results/synthetic_redundancy_hard/es_budget_boundary \
+  --dataset-name synthetic_redundancy_hard \
   --device cpu \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.4 \
   --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
   --es-budgets 50 100 200 \
-  --methods MaxLoss PU-C PU-F PU-G \
+  --methods MaxLoss PU-C PU-F PU-G GREATS \
   --n-train 3000 \
   --n-test 10000 \
   --duplicate-groups 40 \
@@ -204,17 +227,18 @@ Outputs include:
 ## Fixed-ES Budget Noise Experiment
 
 This sweeps label-noise rate at fixed ES budgets and plots ES effective
-compression size and clean test risk versus noise.
+compression size, clean test risk, and ES P2L bounds versus noise.
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_noise \
-  --output-dir results/pu_p2l_es_budget_noise_hard \
+  --output-dir results/synthetic_redundancy_hard/es_budget_noise \
+  --dataset-name synthetic_redundancy_hard \
   --device cpu \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.1 0.2 0.3 0.4 \
   --pretrain-fraction 0.0 \
   --es-budgets 50 100 200 \
-  --methods MaxLoss PU-C PU-F PU-G \
+  --methods MaxLoss PU-C PU-F PU-G GREATS \
   --n-train 3000 \
   --n-test 10000 \
   --duplicate-groups 40 \
@@ -238,6 +262,9 @@ Outputs include:
 - `plots/es_budget_test_risk_vs_noise_budget_50_pretrain_0.png`
 - `plots/es_budget_test_risk_vs_noise_budget_100_pretrain_0.png`
 - `plots/es_budget_test_risk_vs_noise_budget_200_pretrain_0.png`
+- `plots/es_budget_bounds_vs_noise_budget_50_pretrain_0.png`
+- `plots/es_budget_bounds_vs_noise_budget_100_pretrain_0.png`
+- `plots/es_budget_bounds_vs_noise_budget_200_pretrain_0.png`
 
 ## Regenerate Plots
 
@@ -245,30 +272,30 @@ Use this after changing plot style without rerunning experiments:
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/pu_p2l_clean_boundary_hard \
+  --results-dir results/synthetic_redundancy_hard/boundary \
   --kind boundary
 ```
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/pu_p2l_clean_noise_hard \
+  --results-dir results/synthetic_redundancy_hard/noise \
   --kind noise
 ```
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/pu_p2l_es_trace_hard \
+  --results-dir results/synthetic_redundancy_hard/es_trace \
   --kind es_trace
 ```
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/pu_p2l_es_budget_boundary_hard \
+  --results-dir results/synthetic_redundancy_hard/es_budget_boundary \
   --kind es_budget_boundary
 ```
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/pu_p2l_es_budget_noise_hard \
+  --results-dir results/synthetic_redundancy_hard/es_budget_noise \
   --kind es_budget_noise
 ```

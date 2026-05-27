@@ -7,10 +7,14 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.func import functional_call
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
-from .bounds import p2l_bound
+from .bounds import gaussian_kl_isotropic, p2l_bound, pac_bayes_bound
 from .data import CertPool, SplitBundle, deterministic_initial_support, stable_seed, stratified_indices
-from .model import SmallMLP, compute_losses, eval_error, make_model, model_stats, train_model
+from .model import compute_losses, eval_error, make_model, model_stats, train_model
 from .scores import (
     ScoreConfig,
     cosine_matrix,
@@ -28,12 +32,18 @@ METHODS = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
 
 @dataclass(frozen=True)
 class RunConfig:
+    model_name: str
     hidden_dim: int
+    dropout_prob: float
     batch_size: int
+    inference_batch_size: int
     pretrain_epochs: int
     pretrain_lr: float
     p2l_epochs_per_iter: int
     p2l_lr: float
+    optimizer: str
+    momentum: float
+    nesterov: bool
     weight_decay: float
     gamma: float
     delta: float
@@ -41,6 +51,16 @@ class RunConfig:
     initial_per_class: int
     score: ScoreConfig
     greats_probe_size: int
+    pac_bayes_samples: int
+    pac_bayes_delta: float
+    pac_bayes_delta_test: float
+    pac_bayes_prior_sigma: float
+    pac_bayes_posterior_sigma: float
+    pac_bayes_train_epochs: int
+    pac_bayes_lr: float
+    pac_bayes_batch_size: int
+    pac_bayes_kl_weight: float
+    pac_bayes_scope: str
 
 
 def set_all_seeds(seed: int) -> None:
@@ -59,6 +79,185 @@ def deterministic_probe(pool: CertPool, split: SplitBundle, count: int, seed: in
     return pool.x[idx], pool.y[idx]
 
 
+def split_num_classes(split: SplitBundle) -> int:
+    labels = [split.pool.y, split.y_pretrain, split.y_test]
+    max_label = max((int(np.max(y)) for y in labels if len(y)), default=1)
+    return max_label + 1
+
+
+def make_run_model(seed: int, split: SplitBundle, config: RunConfig, device: torch.device) -> nn.Module:
+    return make_model(
+        seed=seed,
+        model_name=config.model_name,
+        input_shape=tuple(split.pool.x.shape[1:]),
+        num_classes=split_num_classes(split),
+        hidden_dim=config.hidden_dim,
+        dropout_prob=config.dropout_prob,
+        device=device,
+    )
+
+
+def parameter_items(model: nn.Module, names: set[str] | None = None) -> list[tuple[str, torch.nn.Parameter]]:
+    return [(name, param) for name, param in model.named_parameters() if names is None or name in names]
+
+
+def parameter_vector(model: nn.Module, names: set[str] | None = None) -> torch.Tensor:
+    return parameters_to_vector([param.detach() for _, param in parameter_items(model, names)]).detach().cpu()
+
+
+def set_parameter_vector(model: nn.Module, vector: torch.Tensor, device: torch.device) -> None:
+    vector_to_parameters(vector.detach().to(device), model.parameters())
+
+
+def pac_bayes_parameter_names(model: nn.Module, scope: str) -> set[str]:
+    names = [name for name, _ in model.named_parameters()]
+    if scope == "all":
+        return set(names)
+    if scope != "head":
+        raise ValueError("PAC-Bayes scope must be 'head' or 'all'.")
+
+    head_names = [
+        name
+        for name in names
+        if name.startswith("head.") or name.startswith("l4.") or name.startswith("fc.")
+    ]
+    if head_names:
+        return set(head_names)
+    return set(names[-2:])
+
+
+def vector_to_named_parameters(
+    model: nn.Module,
+    vector: torch.Tensor,
+    selected_names: set[str],
+) -> dict[str, torch.Tensor]:
+    params: dict[str, torch.Tensor] = {}
+    offset = 0
+    for name, param in model.named_parameters():
+        if name in selected_names:
+            numel = param.numel()
+            params[name] = vector[offset : offset + numel].view_as(param)
+            offset += numel
+        else:
+            params[name] = param.detach()
+    if offset != vector.numel():
+        raise ValueError("PAC-Bayes parameter vector size does not match selected parameters.")
+    return params
+
+
+def torch_gaussian_kl_isotropic(
+    posterior_mean: torch.Tensor,
+    prior_mean: torch.Tensor,
+    posterior_sigma: float,
+    prior_sigma: float,
+) -> torch.Tensor:
+    dim = posterior_mean.numel()
+    variance_ratio = (posterior_sigma / prior_sigma) ** 2
+    log_ratio = 2.0 * np.log(prior_sigma / posterior_sigma)
+    diff_sq = torch.sum((posterior_mean - prior_mean) ** 2)
+    return 0.5 * (
+        dim * (variance_ratio - 1.0 + log_ratio) + diff_sq / (prior_sigma**2)
+    )
+
+
+def pac_bayes_stats(
+    model: nn.Module,
+    prior_vector: torch.Tensor,
+    split: SplitBundle,
+    config: RunConfig,
+    device: torch.device,
+    seed: int,
+) -> dict[str, float | None]:
+    if config.pac_bayes_samples <= 0:
+        return {
+            "pac_bayes_bound": None,
+            "pac_bayes_empirical_risk": None,
+            "pac_bayes_mc_upper": None,
+            "pac_bayes_kl": None,
+        }
+
+    if config.pac_bayes_prior_sigma <= 0 or config.pac_bayes_posterior_sigma <= 0:
+        raise ValueError("PAC-Bayes Gaussian sigmas must be positive.")
+
+    torch.manual_seed(seed)
+    model.eval()
+    selected_names = pac_bayes_parameter_names(model, config.pac_bayes_scope)
+    prior_selected = prior_vector.to(device)
+    posterior_mean = parameter_vector(model, selected_names).to(device).detach().clone().requires_grad_(True)
+    buffers = {name: buffer.detach() for name, buffer in model.named_buffers()}
+    x_pool, y_pool = split.pool.x, split.pool.y
+    x_t = torch.as_tensor(x_pool, dtype=torch.float32, device=device)
+    y_t = torch.as_tensor(y_pool, dtype=torch.long, device=device)
+    n = len(y_pool)
+
+    def logits_from_vector(vector: torch.Tensor, x_batch: torch.Tensor) -> torch.Tensor:
+        params = vector_to_named_parameters(model, vector, selected_names)
+        return functional_call(model, (params, buffers), (x_batch,))
+
+    train_batch_size = config.pac_bayes_batch_size if config.pac_bayes_batch_size > 0 else config.batch_size
+    train_batch_size = max(1, min(train_batch_size, max(n, 1)))
+    if n and config.pac_bayes_train_epochs > 0:
+        optimizer = torch.optim.Adam([posterior_mean], lr=config.pac_bayes_lr)
+        for _ in range(config.pac_bayes_train_epochs):
+            perm = torch.randperm(n, device=device)
+            for start in range(0, n, train_batch_size):
+                idx = perm[start : start + train_batch_size]
+                optimizer.zero_grad(set_to_none=True)
+                sampled_vector = posterior_mean + config.pac_bayes_posterior_sigma * torch.randn_like(posterior_mean)
+                logits = logits_from_vector(sampled_vector, x_t[idx])
+                empirical_loss = F.cross_entropy(logits, y_t[idx])
+                kl_t = torch_gaussian_kl_isotropic(
+                    posterior_mean,
+                    prior_selected,
+                    config.pac_bayes_posterior_sigma,
+                    config.pac_bayes_prior_sigma,
+                )
+                objective = empirical_loss + config.pac_bayes_kl_weight * kl_t / max(n, 1)
+                objective.backward()
+                optimizer.step()
+
+    posterior_vector = posterior_mean.detach().cpu()
+    kl = gaussian_kl_isotropic(
+        posterior_vector,
+        prior_selected.detach().cpu(),
+        posterior_sigma=config.pac_bayes_posterior_sigma,
+        prior_sigma=config.pac_bayes_prior_sigma,
+    )
+
+    empirical_errors: list[float] = []
+    eval_batch_size = max(1, config.inference_batch_size)
+    with torch.no_grad():
+        for _ in range(config.pac_bayes_samples):
+            sampled_vector = posterior_mean.detach() + config.pac_bayes_posterior_sigma * torch.randn_like(
+                posterior_mean
+            )
+            correct = 0
+            total = 0
+            for start in range(0, n, eval_batch_size):
+                logits = logits_from_vector(sampled_vector, x_t[start : start + eval_batch_size])
+                pred = logits.argmax(dim=1)
+                target = y_t[start : start + eval_batch_size]
+                correct += int((pred == target).sum().item())
+                total += len(target)
+            empirical_errors.append(1.0 - correct / max(total, 1))
+
+    empirical_risk = float(np.mean(empirical_errors)) if empirical_errors else 1.0
+    bound, mc_upper = pac_bayes_bound(
+        empirical_risk,
+        kl,
+        len(split.pool.y),
+        config.pac_bayes_delta,
+        config.pac_bayes_samples,
+        config.pac_bayes_delta_test,
+    )
+    return {
+        "pac_bayes_bound": bound,
+        "pac_bayes_empirical_risk": empirical_risk,
+        "pac_bayes_mc_upper": mc_upper,
+        "pac_bayes_kl": kl,
+    }
+
+
 def run_p2l_method(
     method: str,
     seed: int,
@@ -70,7 +269,9 @@ def run_p2l_method(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     set_all_seeds(stable_seed(seed, method, int(pretrain_fraction * 10_000)))
-    model = make_model(stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), config.hidden_dim, device)
+    model = make_run_model(
+        stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
+    )
 
     if len(split.y_pretrain):
         train_model(
@@ -82,7 +283,11 @@ def run_p2l_method(
             batch_size=config.batch_size,
             device=device,
             weight_decay=config.weight_decay,
+            optimizer_name=config.optimizer,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
         )
+    prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     support_set = set(support)
@@ -94,7 +299,7 @@ def run_p2l_method(
     if method == "GREATS":
         probe_x, probe_y = deterministic_probe(split.pool, split, config.greats_probe_size, seed)
     else:
-        probe_x = np.empty((0, split.pool.x.shape[1]), dtype=np.float32)
+        probe_x = np.empty((0, *split.pool.x.shape[1:]), dtype=np.float32)
         probe_y = np.empty((0,), dtype=np.int64)
 
     while True:
@@ -109,6 +314,9 @@ def run_p2l_method(
                 batch_size=config.batch_size,
                 device=device,
                 weight_decay=config.weight_decay,
+                optimizer_name=config.optimizer,
+                momentum=config.momentum,
+                nesterov=config.nesterov,
             )
             train_calls += 1
 
@@ -118,7 +326,9 @@ def run_p2l_method(
             stop_reached = True
             break
 
-        losses = compute_losses(model, split.pool.x[non_support], split.pool.y[non_support], device)
+        losses = compute_losses(
+            model, split.pool.x[non_support], split.pool.y[non_support], device, config.inference_batch_size
+        )
         bad_local = np.flatnonzero(losses > config.gamma)
         remaining_bad = int(len(bad_local))
         if remaining_bad == 0:
@@ -136,8 +346,16 @@ def run_p2l_method(
     compression_size = len(support)
     effective_size = compression_size if stop_reached else compression_size + remaining_bad
     bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
-    test_error = eval_error(model, split.x_test, split.y_test, device)
-    diagnostics = selected_set_diagnostics(model, split.pool, support, device)
+    test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+    pac_stats = pac_bayes_stats(
+        model,
+        prior_vector,
+        split,
+        config,
+        device,
+        stable_seed(seed, f"{method}-pac-bayes-final", int(pretrain_fraction * 10_000)),
+    )
+    diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
     runtime_sec = time.perf_counter() - started
 
     return {
@@ -152,6 +370,7 @@ def run_p2l_method(
         "effective_compression_size": effective_size,
         "certified_bound": bound,
         "test_error": test_error,
+        **pac_stats,
         "runtime_sec": runtime_sec,
         "stop_reached": int(stop_reached),
         "train_calls": train_calls,
@@ -171,7 +390,9 @@ def run_p2l_trace(
 ) -> list[dict[str, Any]]:
     started = time.perf_counter()
     set_all_seeds(stable_seed(seed, method, int(pretrain_fraction * 10_000)))
-    model = make_model(stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), config.hidden_dim, device)
+    model = make_run_model(
+        stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
+    )
 
     if len(split.y_pretrain):
         train_model(
@@ -183,7 +404,11 @@ def run_p2l_trace(
             batch_size=config.batch_size,
             device=device,
             weight_decay=config.weight_decay,
+            optimizer_name=config.optimizer,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
         )
+    prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     initial_support_size = len(support)
@@ -195,7 +420,7 @@ def run_p2l_trace(
     if method == "GREATS":
         probe_x, probe_y = deterministic_probe(split.pool, split, config.greats_probe_size, seed)
     else:
-        probe_x = np.empty((0, split.pool.x.shape[1]), dtype=np.float32)
+        probe_x = np.empty((0, *split.pool.x.shape[1:]), dtype=np.float32)
         probe_y = np.empty((0,), dtype=np.int64)
 
     record_every = max(1, int(record_every))
@@ -212,6 +437,9 @@ def run_p2l_trace(
                 batch_size=config.batch_size,
                 device=device,
                 weight_decay=config.weight_decay,
+                optimizer_name=config.optimizer,
+                momentum=config.momentum,
+                nesterov=config.nesterov,
             )
             train_calls += 1
 
@@ -225,7 +453,9 @@ def run_p2l_trace(
         if len(non_support) == 0:
             stop_reached = True
         else:
-            losses = compute_losses(model, split.pool.x[non_support], split.pool.y[non_support], device)
+            losses = compute_losses(
+                model, split.pool.x[non_support], split.pool.y[non_support], device, config.inference_batch_size
+            )
             bad_local = np.flatnonzero(losses > config.gamma)
             remaining_bad = int(len(bad_local))
             stop_reached = remaining_bad == 0
@@ -235,8 +465,16 @@ def run_p2l_trace(
         if should_record:
             effective_size = len(support) if stop_reached else len(support) + remaining_bad
             bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
-            test_error = eval_error(model, split.x_test, split.y_test, device)
-            diagnostics = selected_set_diagnostics(model, split.pool, support, device)
+            test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+            pac_stats = pac_bayes_stats(
+                model,
+                prior_vector,
+                split,
+                config,
+                device,
+                stable_seed(seed, f"{method}-pac-bayes-trace", step + int(pretrain_fraction * 10_000)),
+            )
+            diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
             rows.append(
                 {
                     "method": method,
@@ -251,6 +489,7 @@ def run_p2l_trace(
                     "effective_compression_size": effective_size,
                     "certified_bound": bound,
                     "test_error": test_error,
+                    **pac_stats,
                     "runtime_sec": time.perf_counter() - started,
                     "stop_reached": int(stop_reached),
                     "hit_limit": int(hit_limit),
@@ -287,7 +526,9 @@ def run_p2l_es_budgets(
 
     started = time.perf_counter()
     set_all_seeds(stable_seed(seed, method, int(pretrain_fraction * 10_000)))
-    model = make_model(stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), config.hidden_dim, device)
+    model = make_run_model(
+        stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
+    )
 
     if len(split.y_pretrain):
         train_model(
@@ -299,7 +540,11 @@ def run_p2l_es_budgets(
             batch_size=config.batch_size,
             device=device,
             weight_decay=config.weight_decay,
+            optimizer_name=config.optimizer,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
         )
+    prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     initial_support_size = len(support)
@@ -313,7 +558,7 @@ def run_p2l_es_budgets(
     if method == "GREATS":
         probe_x, probe_y = deterministic_probe(split.pool, split, config.greats_probe_size, seed)
     else:
-        probe_x = np.empty((0, split.pool.x.shape[1]), dtype=np.float32)
+        probe_x = np.empty((0, *split.pool.x.shape[1:]), dtype=np.float32)
         probe_y = np.empty((0,), dtype=np.int64)
 
     def append_snapshot(
@@ -325,8 +570,16 @@ def run_p2l_es_budgets(
     ) -> None:
         effective_size = len(support) if stop_reached else len(support) + remaining_bad
         bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
-        test_error = eval_error(model, split.x_test, split.y_test, device)
-        diagnostics = selected_set_diagnostics(model, split.pool, support, device)
+        test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+        pac_stats = pac_bayes_stats(
+            model,
+            prior_vector,
+            split,
+            config,
+            device,
+            stable_seed(seed, f"{method}-pac-bayes-budget", budget + int(pretrain_fraction * 10_000)),
+        )
+        diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
         rows.append(
             {
                 "method": method,
@@ -342,6 +595,7 @@ def run_p2l_es_budgets(
                 "effective_compression_size": effective_size,
                 "certified_bound": bound,
                 "test_error": test_error,
+                **pac_stats,
                 "runtime_sec": time.perf_counter() - started,
                 "stop_reached": int(stop_reached),
                 "hit_limit": int(hit_limit),
@@ -363,6 +617,9 @@ def run_p2l_es_budgets(
                 batch_size=config.batch_size,
                 device=device,
                 weight_decay=config.weight_decay,
+                optimizer_name=config.optimizer,
+                momentum=config.momentum,
+                nesterov=config.nesterov,
             )
             train_calls += 1
 
@@ -376,7 +633,9 @@ def run_p2l_es_budgets(
         if len(non_support) == 0:
             stop_reached = True
         else:
-            losses = compute_losses(model, split.pool.x[non_support], split.pool.y[non_support], device)
+            losses = compute_losses(
+                model, split.pool.x[non_support], split.pool.y[non_support], device, config.inference_batch_size
+            )
             bad_local = np.flatnonzero(losses > config.gamma)
             remaining_bad = int(len(bad_local))
             stop_reached = remaining_bad == 0
@@ -402,10 +661,11 @@ def run_p2l_es_budgets(
 
 
 def selected_set_diagnostics(
-    model: SmallMLP,
+    model: nn.Module,
     pool: CertPool,
     selected: list[int],
     device: torch.device,
+    batch_size: int,
 ) -> dict[str, float]:
     if not selected:
         return {
@@ -414,7 +674,7 @@ def selected_set_diagnostics(
             "pairwise_feature_cosine": 0.0,
         }
     selected_arr = np.asarray(selected, dtype=np.int64)
-    stats = model_stats(model, pool.x[selected_arr], pool.y[selected_arr], device)
+    stats = model_stats(model, pool.x[selected_arr], pool.y[selected_arr], device, batch_size)
     if len(selected_arr) < 2:
         pairwise_feature_cosine = 0.0
     else:
@@ -429,7 +689,7 @@ def selected_set_diagnostics(
 
 def choose_next(
     method: str,
-    model: SmallMLP,
+    model: nn.Module,
     pool: CertPool,
     support: list[int],
     candidate: np.ndarray,
@@ -443,8 +703,8 @@ def choose_next(
         return tie_break_argmax(candidate, candidate_losses, pool.sample_id)
 
     support_arr = np.asarray(support, dtype=np.int64)
-    support_stats = model_stats(model, pool.x[support_arr], pool.y[support_arr], device)
-    cand_stats = model_stats(model, pool.x[candidate], pool.y[candidate], device)
+    support_stats = model_stats(model, pool.x[support_arr], pool.y[support_arr], device, config.inference_batch_size)
+    cand_stats = model_stats(model, pool.x[candidate], pool.y[candidate], device, config.inference_batch_size)
 
     if method == "PU-C":
         scores = score_pu_c(candidate, candidate_losses, support_stats, cand_stats, config.score)
@@ -457,7 +717,7 @@ def choose_next(
             candidate, candidate_losses, support_arr, support_stats, cand_stats, pool, config.score, True
         )
     elif method == "GREATS":
-        probe_stats = model_stats(model, probe_x, probe_y, device)
+        probe_stats = model_stats(model, probe_x, probe_y, device, config.inference_batch_size)
         scores = score_greats_reference(cand_stats, probe_stats, support_stats, config.score.lambda_redundancy)
     else:
         raise ValueError(f"Unknown method: {method}")

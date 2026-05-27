@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from .data import make_pretrain_split, make_redundancy_dataset
+from .data import make_experiment_dataset, make_pretrain_split, pac_bayes_enabled_for_dataset
 from .io_utils import RESULT_FIELDS, summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_boundary
@@ -22,7 +22,10 @@ except ImportError:  # pragma: no cover
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run clean PU-P2L boundary experiments.")
-    parser.add_argument("--output-dir", type=str, default="results/pu_p2l_clean_boundary_hard")
+    parser.add_argument("--output-dir", type=str, default="results/synthetic_redundancy_hard/boundary")
+    parser.add_argument("--dataset-name", type=str, default="synthetic_redundancy_hard")
+    parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument("--download-data", action="store_true")
     parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "mps", "cuda", "auto"])
     parser.add_argument("--seeds", type=int, nargs="+", default=list(range(10)))
     parser.add_argument("--noise-rates", type=float, nargs="+", default=[0.0, 0.4])
@@ -43,18 +46,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--band-std", type=float, default=0.35)
     parser.add_argument("--duplicate-std", type=float, default=0.015)
 
+    parser.add_argument("--model-name", type=str, default="auto", choices=["auto", "small_mlp", "mnist_fcn", "cifar_resnet18"])
     parser.add_argument("--hidden-dim", type=int, default=64)
+    parser.add_argument("--dropout-prob", type=float, default=0.2)
     parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--inference-batch-size", type=int, default=1024)
     parser.add_argument("--pretrain-epochs", type=int, default=30)
     parser.add_argument("--pretrain-lr", type=float, default=1e-2)
     parser.add_argument("--p2l-epochs-per-iter", type=int, default=1)
     parser.add_argument("--p2l-lr", type=float, default=1e-2)
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "sgd"])
+    parser.add_argument("--momentum", type=float, default=0.0)
+    parser.add_argument("--nesterov", action="store_true")
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--gamma", type=float, default=-math.log(0.5))
     parser.add_argument("--delta", type=float, default=0.035)
     parser.add_argument("--max-total-support", type=int, default=600)
     parser.add_argument("--initial-per-class", type=int, default=2)
     parser.add_argument("--greats-probe-size", type=int, default=64)
+    add_pac_bayes_args(parser, default_samples=0)
 
     parser.add_argument("--r-h", type=int, default=5)
     parser.add_argument("--r-consensus", type=int, default=10)
@@ -69,20 +79,59 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def add_pac_bayes_args(parser: argparse.ArgumentParser, default_samples: int) -> None:
+    parser.add_argument(
+        "--pac-bayes-samples",
+        type=int,
+        default=default_samples,
+        help="Number of posterior samples for PAC-Bayes. Use 0 to disable; synthetic redundancy always forces 0.",
+    )
+    parser.add_argument("--pac-bayes-delta", type=float, default=None)
+    parser.add_argument("--pac-bayes-delta-test", type=float, default=0.01)
+    parser.add_argument("--pac-bayes-prior-sigma", type=float, default=0.05)
+    parser.add_argument("--pac-bayes-posterior-sigma", type=float, default=0.05)
+    parser.add_argument("--pac-bayes-train-epochs", type=int, default=0)
+    parser.add_argument("--pac-bayes-lr", type=float, default=1e-3)
+    parser.add_argument("--pac-bayes-batch-size", type=int, default=0)
+    parser.add_argument("--pac-bayes-kl-weight", type=float, default=1.0)
+    parser.add_argument("--pac-bayes-scope", type=str, default="head", choices=["head", "all"])
+
+
 def build_config(args: argparse.Namespace) -> RunConfig:
+    pac_bayes_delta = getattr(args, "pac_bayes_delta", None)
+    pac_bayes_samples = getattr(args, "pac_bayes_samples", 0)
+    if not pac_bayes_enabled_for_dataset(getattr(args, "dataset_name", "")):
+        pac_bayes_samples = 0
+        setattr(args, "pac_bayes_samples", 0)
     return RunConfig(
+        model_name=args.model_name,
         hidden_dim=args.hidden_dim,
+        dropout_prob=args.dropout_prob,
         batch_size=args.batch_size,
+        inference_batch_size=args.inference_batch_size,
         pretrain_epochs=args.pretrain_epochs,
         pretrain_lr=args.pretrain_lr,
         p2l_epochs_per_iter=args.p2l_epochs_per_iter,
         p2l_lr=args.p2l_lr,
+        optimizer=args.optimizer,
+        momentum=args.momentum,
+        nesterov=args.nesterov,
         weight_decay=args.weight_decay,
         gamma=args.gamma,
         delta=args.delta,
         max_total_support=args.max_total_support,
         initial_per_class=args.initial_per_class,
         greats_probe_size=args.greats_probe_size,
+        pac_bayes_samples=pac_bayes_samples,
+        pac_bayes_delta=args.delta if pac_bayes_delta is None else pac_bayes_delta,
+        pac_bayes_delta_test=getattr(args, "pac_bayes_delta_test", 0.01),
+        pac_bayes_prior_sigma=getattr(args, "pac_bayes_prior_sigma", 1.0),
+        pac_bayes_posterior_sigma=getattr(args, "pac_bayes_posterior_sigma", 0.05),
+        pac_bayes_train_epochs=getattr(args, "pac_bayes_train_epochs", 0),
+        pac_bayes_lr=getattr(args, "pac_bayes_lr", 1e-3),
+        pac_bayes_batch_size=getattr(args, "pac_bayes_batch_size", 0),
+        pac_bayes_kl_weight=getattr(args, "pac_bayes_kl_weight", 1.0),
+        pac_bayes_scope=getattr(args, "pac_bayes_scope", "head"),
         score=ScoreConfig(
             gamma=args.gamma,
             c_loss=args.c_loss,
@@ -95,6 +144,24 @@ def build_config(args: argparse.Namespace) -> RunConfig:
             consensus_weight=args.consensus_weight,
             noise_penalty=args.noise_penalty,
         ),
+    )
+
+
+def make_dataset_from_args(args: argparse.Namespace, seed: int, noise_rate: float):
+    return make_experiment_dataset(
+        dataset_name=args.dataset_name,
+        seed=seed,
+        n_train=args.n_train,
+        n_test=args.n_test,
+        duplicate_groups=args.duplicate_groups,
+        duplicates_per_group=args.duplicates_per_group,
+        noise_rate=noise_rate,
+        ambiguous_fraction=args.ambiguous_fraction,
+        cluster_std=args.cluster_std,
+        band_std=args.band_std,
+        duplicate_std=args.duplicate_std,
+        data_dir=args.data_dir,
+        download=args.download_data,
     )
 
 
@@ -123,32 +190,26 @@ def main() -> None:
     for seed, noise_rate, pretrain_fraction, method in progress:
         key = (seed, noise_rate, pretrain_fraction)
         if key not in cache:
-            bundle = make_redundancy_dataset(
-                seed=seed,
-                n_train=args.n_train,
-                n_test=args.n_test,
-                duplicate_groups=args.duplicate_groups,
-                duplicates_per_group=args.duplicates_per_group,
-                noise_rate=noise_rate,
-                ambiguous_fraction=args.ambiguous_fraction,
-                cluster_std=args.cluster_std,
-                band_std=args.band_std,
-                duplicate_std=args.duplicate_std,
-            )
+            bundle = make_dataset_from_args(args, seed, noise_rate)
             cache[key] = make_pretrain_split(bundle, pretrain_fraction, seed)
         row = run_p2l_method(method, seed, noise_rate, pretrain_fraction, cache[key], config, device)
+        row["dataset"] = args.dataset_name
         rows.append(row)
 
     write_csv(output_dir / "results.csv", RESULT_FIELDS, rows)
     summary = summarize(
         rows,
-        group_fields=["method", "noise_rate", "pretrain_fraction"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction"],
         numeric_fields=[
             "compression_size",
             "remaining_bad",
             "effective_compression_size",
             "certified_bound",
             "test_error",
+            "pac_bayes_bound",
+            "pac_bayes_empirical_risk",
+            "pac_bayes_mc_upper",
+            "pac_bayes_kl",
             "runtime_sec",
             "stop_reached",
             "train_calls",
@@ -167,4 +228,3 @@ def main() -> None:
 if __name__ == "__main__":
     torch.set_num_threads(max(torch.get_num_threads(), 1))
     main()
-

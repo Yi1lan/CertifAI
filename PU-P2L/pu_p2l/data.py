@@ -5,6 +5,24 @@ from dataclasses import dataclass
 import numpy as np
 
 
+NO_PAC_BAYES_DATASETS = {"synthetic_redundancy_hard", "synthetic_redundacy_hard"}
+
+
+def pac_bayes_enabled_for_dataset(dataset_name: str) -> bool:
+    return dataset_name.strip() not in NO_PAC_BAYES_DATASETS
+
+
+def canonical_dataset_name(dataset_name: str) -> str:
+    name = dataset_name.strip().lower().replace("-", "_")
+    if name in {"mnist", "binary_mnist", "binarymnist"}:
+        return "mnist"
+    if name in {"cifar", "cifar10", "cifar_10", "cifar10_reduced"}:
+        return "cifar10"
+    if name in {"synthetic_redundancy_hard", "synthetic_redundacy_hard"}:
+        return "synthetic_redundancy_hard"
+    return name
+
+
 @dataclass(frozen=True)
 class DatasetBundle:
     x_train: np.ndarray
@@ -162,9 +180,14 @@ def stratified_indices(y: np.ndarray, count: int, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     chosen: list[int] = []
     remaining = count
-    for cls in [0, 1]:
+    classes = sorted(int(cls) for cls in np.unique(y).tolist())
+    if not classes:
+        return np.array([], dtype=np.int64)
+    base_per_class = count // len(classes)
+    extra = count % len(classes)
+    for class_pos, cls in enumerate(classes):
         cls_idx = np.where(y == cls)[0]
-        cls_count = min(len(cls_idx), count // 2)
+        cls_count = min(len(cls_idx), base_per_class + int(class_pos < extra))
         if cls_count:
             chosen.extend(rng.choice(cls_idx, size=cls_count, replace=False).tolist())
             remaining -= cls_count
@@ -172,6 +195,158 @@ def stratified_indices(y: np.ndarray, count: int, seed: int) -> np.ndarray:
         available = np.setdiff1d(np.arange(len(y)), np.asarray(chosen, dtype=np.int64), assume_unique=False)
         chosen.extend(rng.choice(available, size=min(remaining, len(available)), replace=False).tolist())
     return np.asarray(sorted(set(chosen)), dtype=np.int64)
+
+
+def apply_label_noise(
+    y: np.ndarray,
+    num_classes: int,
+    noise_rate: float,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    y_noisy = y.astype(np.int64).copy()
+    is_noisy = rng.random(len(y_noisy)) < float(noise_rate)
+    if np.any(is_noisy):
+        if num_classes == 2:
+            y_noisy[is_noisy] = 1 - y_noisy[is_noisy]
+        else:
+            offsets = rng.integers(1, num_classes, size=int(np.sum(is_noisy)))
+            y_noisy[is_noisy] = (y_noisy[is_noisy] + offsets) % num_classes
+    return y_noisy, is_noisy
+
+
+def _require_torchvision():
+    try:
+        from torchvision import datasets
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise RuntimeError(
+            "MNIST/CIFAR experiments require torchvision. Install it in the Conda environment first."
+        ) from exc
+    return datasets
+
+
+def make_mnist_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+) -> DatasetBundle:
+    datasets = _require_torchvision()
+    train = datasets.MNIST(root=data_dir, train=True, download=download)
+    test = datasets.MNIST(root=data_dir, train=False, download=download)
+
+    x_train_all = train.data.numpy().astype(np.float32)
+    y_train_all = (np.asarray(train.targets, dtype=np.int64) > 4).astype(np.int64)
+    x_test_all = test.data.numpy().astype(np.float32)
+    y_test_all = (np.asarray(test.targets, dtype=np.int64) > 4).astype(np.int64)
+
+    train_count = min(int(n_train), len(y_train_all))
+    test_count = min(int(n_test), len(y_test_all))
+    train_idx = stratified_indices(y_train_all, train_count, stable_seed(seed, "mnist-train"))
+    test_idx = stratified_indices(y_test_all, test_count, stable_seed(seed, "mnist-test"))
+
+    x_train = ((x_train_all[train_idx] / 255.0 - 0.1307) / 0.3081)[:, None, :, :].astype(np.float32)
+    true_y_train = y_train_all[train_idx].astype(np.int64)
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 2, noise_rate, stable_seed(seed, "mnist-label-noise", int(noise_rate * 10_000))
+    )
+    x_test = ((x_test_all[test_idx] / 255.0 - 0.1307) / 0.3081)[:, None, :, :].astype(np.float32)
+    y_test = y_test_all[test_idx].astype(np.int64)
+
+    return DatasetBundle(
+        x_train=x_train,
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=np.full(len(y_train), -1, dtype=np.int64),
+        is_duplicate_train=np.zeros(len(y_train), dtype=bool),
+        is_noisy_train=is_noisy_train,
+        x_test=x_test,
+        y_test=y_test,
+    )
+
+
+def make_cifar10_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+) -> DatasetBundle:
+    datasets = _require_torchvision()
+    train = datasets.CIFAR10(root=data_dir, train=True, download=download)
+    test = datasets.CIFAR10(root=data_dir, train=False, download=download)
+
+    x_train_all = train.data.astype(np.float32)
+    y_train_all = np.asarray(train.targets, dtype=np.int64)
+    x_test_all = test.data.astype(np.float32)
+    y_test_all = np.asarray(test.targets, dtype=np.int64)
+
+    train_count = min(int(n_train), len(y_train_all))
+    test_count = min(int(n_test), len(y_test_all))
+    train_idx = stratified_indices(y_train_all, train_count, stable_seed(seed, "cifar10-train"))
+    test_idx = stratified_indices(y_test_all, test_count, stable_seed(seed, "cifar10-test"))
+
+    mean = np.asarray([0.4914, 0.4822, 0.4465], dtype=np.float32)[:, None, None]
+    std = np.asarray([0.2470, 0.2435, 0.2616], dtype=np.float32)[:, None, None]
+    x_train = np.transpose(x_train_all[train_idx] / 255.0, (0, 3, 1, 2))
+    x_train = ((x_train - mean) / std).astype(np.float32)
+    true_y_train = y_train_all[train_idx].astype(np.int64)
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 10, noise_rate, stable_seed(seed, "cifar10-label-noise", int(noise_rate * 10_000))
+    )
+    x_test = np.transpose(x_test_all[test_idx] / 255.0, (0, 3, 1, 2))
+    x_test = ((x_test - mean) / std).astype(np.float32)
+    y_test = y_test_all[test_idx].astype(np.int64)
+
+    return DatasetBundle(
+        x_train=x_train,
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=np.full(len(y_train), -1, dtype=np.int64),
+        is_duplicate_train=np.zeros(len(y_train), dtype=bool),
+        is_noisy_train=is_noisy_train,
+        x_test=x_test,
+        y_test=y_test,
+    )
+
+
+def make_experiment_dataset(
+    dataset_name: str,
+    seed: int,
+    n_train: int,
+    n_test: int,
+    duplicate_groups: int,
+    duplicates_per_group: int,
+    noise_rate: float,
+    ambiguous_fraction: float,
+    cluster_std: float,
+    band_std: float,
+    duplicate_std: float,
+    data_dir: str,
+    download: bool,
+) -> DatasetBundle:
+    name = canonical_dataset_name(dataset_name)
+    if name == "synthetic_redundancy_hard":
+        return make_redundancy_dataset(
+            seed=seed,
+            n_train=n_train,
+            n_test=n_test,
+            duplicate_groups=duplicate_groups,
+            duplicates_per_group=duplicates_per_group,
+            noise_rate=noise_rate,
+            ambiguous_fraction=ambiguous_fraction,
+            cluster_std=cluster_std,
+            band_std=band_std,
+            duplicate_std=duplicate_std,
+        )
+    if name == "mnist":
+        return make_mnist_dataset(seed, n_train, n_test, noise_rate, data_dir, download)
+    if name == "cifar10":
+        return make_cifar10_dataset(seed, n_train, n_test, noise_rate, data_dir, download)
+    raise ValueError(f"Unknown dataset '{dataset_name}'. Valid datasets: synthetic_redundancy_hard, mnist, cifar10.")
 
 
 def make_pretrain_split(bundle: DatasetBundle, pretrain_fraction: float, seed: int) -> SplitBundle:
@@ -209,4 +384,3 @@ def deterministic_initial_support(pool: CertPool, per_class: int, seed: int) -> 
         order = np.lexsort((pool.sample_id[cls_idx], -keys[cls_idx]))
         selected.extend(int(idx) for idx in cls_idx[order[: min(per_class, len(order))]])
     return sorted(set(selected), key=lambda idx: int(pool.sample_id[idx]))
-
