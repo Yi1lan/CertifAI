@@ -11,7 +11,7 @@ from .data import make_pretrain_split
 from .io_utils import RESULT_FIELDS, summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_noise
-from .runner import METHODS, run_p2l_method
+from .runner import DEFAULT_METHODS, METHODS, run_p2l_method
 from .run_boundary import add_pac_bayes_args, build_config, make_dataset_from_args
 
 try:
@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seeds", type=int, nargs="+", default=list(range(10)))
     parser.add_argument("--noise-rates", type=float, nargs="+", default=[0.0, 0.1, 0.2, 0.3, 0.4])
     parser.add_argument("--pretrain-fraction", type=float, default=0.0)
-    parser.add_argument("--methods", type=str, nargs="+", default=METHODS)
+    parser.add_argument("--methods", type=str, nargs="+", default=DEFAULT_METHODS)
 
     parser.add_argument("--n-train", type=int, default=3000)
     parser.add_argument("--n-test", type=int, default=10000)

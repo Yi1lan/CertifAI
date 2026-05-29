@@ -18,6 +18,7 @@ from .model import compute_losses, eval_error, make_model, model_stats, train_mo
 from .scores import (
     ScoreConfig,
     cosine_matrix,
+    score_marginal,
     score_greats_reference,
     score_pu_c,
     score_pu_f_or_g,
@@ -25,9 +26,10 @@ from .scores import (
 )
 
 
-CERTIFIED_METHODS = {"MaxLoss", "PU-C", "PU-F", "PU-G"}
+CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G"}
 REFERENCE_METHODS = {"GREATS"}
-METHODS = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
+METHODS = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G", "GREATS"]
+DEFAULT_METHODS = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
 
 
 @dataclass(frozen=True)
@@ -699,12 +701,19 @@ def choose_next(
     probe_x: np.ndarray,
     probe_y: np.ndarray,
 ) -> int:
-    if method == "MaxLoss" or not support:
+    if method == "MaxLoss":
         return tie_break_argmax(candidate, candidate_losses, pool.sample_id)
+    if method != "Marginal" and not support:
+        return tie_break_argmax(candidate, candidate_losses, pool.sample_id)
+
+    cand_stats = model_stats(model, pool.x[candidate], pool.y[candidate], device, config.inference_batch_size)
+
+    if method == "Marginal":
+        scores = score_marginal(cand_stats)
+        return tie_break_argmax(candidate, scores, pool.sample_id)
 
     support_arr = np.asarray(support, dtype=np.int64)
     support_stats = model_stats(model, pool.x[support_arr], pool.y[support_arr], device, config.inference_batch_size)
-    cand_stats = model_stats(model, pool.x[candidate], pool.y[candidate], device, config.inference_batch_size)
 
     if method == "PU-C":
         scores = score_pu_c(candidate, candidate_losses, support_stats, cand_stats, config.score)

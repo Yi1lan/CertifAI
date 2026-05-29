@@ -85,6 +85,10 @@ def score_pu_c(
     return clipped_loss + config.mu * novelty - config.global_redundancy_weight * max_all_feature_sim
 
 
+def score_marginal(cand_stats: ModelStats) -> np.ndarray:
+    return -cand_stats.margins
+
+
 def score_pu_f_or_g(
     candidate: np.ndarray,
     candidate_losses: np.ndarray,
@@ -158,4 +162,3 @@ def score_greats_reference(
         axis=1,
     )
     return utility - lambda_redundancy * redundancy
-

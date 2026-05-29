@@ -11,7 +11,7 @@ from .data import make_experiment_dataset, make_pretrain_split, pac_bayes_enable
 from .io_utils import RESULT_FIELDS, summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_boundary
-from .runner import METHODS, RunConfig, run_p2l_method
+from .runner import DEFAULT_METHODS, METHODS, RunConfig, run_p2l_method
 from .scores import ScoreConfig
 
 try:
@@ -35,7 +35,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
     )
-    parser.add_argument("--methods", type=str, nargs="+", default=METHODS)
+    parser.add_argument("--methods", type=str, nargs="+", default=DEFAULT_METHODS)
 
     parser.add_argument("--n-train", type=int, default=3000)
     parser.add_argument("--n-test", type=int, default=10000)

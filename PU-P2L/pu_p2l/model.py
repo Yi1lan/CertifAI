@@ -13,6 +13,7 @@ class ModelStats:
     losses: np.ndarray
     embeddings: np.ndarray
     errors: np.ndarray
+    margins: np.ndarray
 
 
 class SmallMLP(nn.Module):
@@ -259,18 +260,26 @@ def model_stats(
     losses: list[np.ndarray] = []
     embeddings: list[np.ndarray] = []
     errors: list[np.ndarray] = []
+    margins: list[np.ndarray] = []
     with torch.no_grad():
         for start in range(0, len(y), batch_size):
             logits, emb = model(x_t[start : start + batch_size], return_embedding=True)
             target = y_t[start : start + batch_size]
             loss = F.cross_entropy(logits, target, reduction="none")
             probs = logits.softmax(dim=1)
+            if probs.shape[1] >= 2:
+                top2 = torch.topk(probs, k=2, dim=1).values
+                margin = top2[:, 0] - top2[:, 1]
+            else:
+                margin = probs[:, 0]
             one_hot = F.one_hot(target, num_classes=logits.shape[1]).float()
             losses.append(loss.detach().cpu().numpy())
             embeddings.append(emb.detach().cpu().numpy())
             errors.append((probs - one_hot).detach().cpu().numpy())
+            margins.append(margin.detach().cpu().numpy())
     return ModelStats(
         losses=np.concatenate(losses) if losses else np.array([], dtype=np.float64),
         embeddings=np.vstack(embeddings) if embeddings else np.empty((0, 0), dtype=np.float64),
-        errors=np.vstack(errors) if errors else np.empty((0, 2), dtype=np.float64),
+        errors=np.vstack(errors) if errors else np.empty((0, 0), dtype=np.float64),
+        margins=np.concatenate(margins) if margins else np.array([], dtype=np.float64),
     )

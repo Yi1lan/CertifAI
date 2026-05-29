@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import gzip
+import struct
+import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -215,6 +219,18 @@ def apply_label_noise(
     return y_noisy, is_noisy
 
 
+MNIST_FILES = {
+    "train_images": "train-images-idx3-ubyte.gz",
+    "train_labels": "train-labels-idx1-ubyte.gz",
+    "test_images": "t10k-images-idx3-ubyte.gz",
+    "test_labels": "t10k-labels-idx1-ubyte.gz",
+}
+MNIST_URLS = (
+    "https://ossci-datasets.s3.amazonaws.com/mnist/",
+    "https://storage.googleapis.com/cvdf-datasets/mnist/",
+)
+
+
 def _require_torchvision():
     try:
         from torchvision import datasets
@@ -225,6 +241,74 @@ def _require_torchvision():
     return datasets
 
 
+def _download_mnist_file(raw_dir: Path, file_name: str, download: bool) -> Path:
+    path = raw_dir / file_name
+    if path.exists():
+        return path
+    if not download:
+        raise RuntimeError(
+            f"MNIST file {path} is missing. Re-run with --download-data or install torchvision."
+        )
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    errors: list[str] = []
+    for base_url in MNIST_URLS:
+        url = base_url + file_name
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response, path.open("wb") as handle:
+                handle.write(response.read())
+            return path
+        except OSError as exc:
+            errors.append(f"{url}: {exc}")
+    raise RuntimeError("Could not download MNIST IDX files: " + "; ".join(errors))
+
+
+def _read_idx_images(path: Path) -> np.ndarray:
+    with gzip.open(path, "rb") as handle:
+        magic, count, rows, cols = struct.unpack(">IIII", handle.read(16))
+        if magic != 2051:
+            raise RuntimeError(f"Unexpected MNIST image magic number in {path}: {magic}")
+        data = np.frombuffer(handle.read(), dtype=np.uint8)
+    return data.reshape(count, rows, cols)
+
+
+def _read_idx_labels(path: Path) -> np.ndarray:
+    with gzip.open(path, "rb") as handle:
+        magic, count = struct.unpack(">II", handle.read(8))
+        if magic != 2049:
+            raise RuntimeError(f"Unexpected MNIST label magic number in {path}: {magic}")
+        data = np.frombuffer(handle.read(), dtype=np.uint8)
+    return data.reshape(count).astype(np.int64)
+
+
+def _load_mnist_arrays(
+    data_dir: str,
+    download: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    try:
+        from torchvision import datasets  # type: ignore
+
+        train = datasets.MNIST(root=data_dir, train=True, download=download)
+        test = datasets.MNIST(root=data_dir, train=False, download=download)
+        return (
+            train.data.numpy().astype(np.float32),
+            np.asarray(train.targets, dtype=np.int64),
+            test.data.numpy().astype(np.float32),
+            np.asarray(test.targets, dtype=np.int64),
+        )
+    except ImportError:
+        raw_dir = Path(data_dir) / "MNIST" / "raw"
+        paths = {
+            key: _download_mnist_file(raw_dir, file_name, download)
+            for key, file_name in MNIST_FILES.items()
+        }
+        return (
+            _read_idx_images(paths["train_images"]).astype(np.float32),
+            _read_idx_labels(paths["train_labels"]),
+            _read_idx_images(paths["test_images"]).astype(np.float32),
+            _read_idx_labels(paths["test_labels"]),
+        )
+
+
 def make_mnist_dataset(
     seed: int,
     n_train: int,
@@ -233,14 +317,9 @@ def make_mnist_dataset(
     data_dir: str,
     download: bool,
 ) -> DatasetBundle:
-    datasets = _require_torchvision()
-    train = datasets.MNIST(root=data_dir, train=True, download=download)
-    test = datasets.MNIST(root=data_dir, train=False, download=download)
-
-    x_train_all = train.data.numpy().astype(np.float32)
-    y_train_all = (np.asarray(train.targets, dtype=np.int64) > 4).astype(np.int64)
-    x_test_all = test.data.numpy().astype(np.float32)
-    y_test_all = (np.asarray(test.targets, dtype=np.int64) > 4).astype(np.int64)
+    x_train_all, y_train_digits, x_test_all, y_test_digits = _load_mnist_arrays(data_dir, download)
+    y_train_all = (y_train_digits > 4).astype(np.int64)
+    y_test_all = (y_test_digits > 4).astype(np.int64)
 
     train_count = min(int(n_train), len(y_train_all))
     test_count = min(int(n_test), len(y_test_all))

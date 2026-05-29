@@ -19,14 +19,15 @@ from .io_utils import read_csv, to_float
 
 COLORS = {
     "MaxLoss": "#274753",
+    "Marginal": "#7b5ea7",
     "PU-C": "#297270",
     "PU-F": "#299d8f",
     "PU-G": "#8ab07c",
     "GREATS": "#e66d50",
 }
-METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
-CERTIFIED_METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G"]
-BOUND_METHOD_ORDER = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
+METHOD_ORDER = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G", "GREATS"]
+CERTIFIED_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G"]
+BOUND_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G", "GREATS"]
 GENERALIZATION_BOUND_CURVES = [
     ("test_error", "risk", "-", 1.8, 0.16),
     ("certified_bound", "P2L", "--", 1.7, 0.10),
@@ -466,6 +467,27 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
                 / f"es_bound_and_risk_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
                 max_step=100,
             )
+            plot_step_metric(
+                rows,
+                methods,
+                noise_rate,
+                pretrain_fraction,
+                "remaining_bad",
+                "Inappropriate points left",
+                "Inappropriate Points Left vs Step",
+                plots_dir / f"remaining_bad_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+            )
+            plot_step_metric(
+                rows,
+                methods,
+                noise_rate,
+                pretrain_fraction,
+                "remaining_bad",
+                "Inappropriate points left",
+                "Inappropriate Points Left vs Step",
+                plots_dir / f"remaining_bad_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                max_step=100,
+            )
 
 
 def plot_step_bound_and_risk(
@@ -540,6 +562,40 @@ def plot_step_bound_and_risk(
     )
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def plot_step_metric(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    noise_rate: float,
+    pretrain_fraction: float,
+    metric: str,
+    ylabel: str,
+    title: str,
+    path: Path,
+    max_step: float | None = None,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9, 5.2))
+    for method in methods:
+        xs, means, ses = grouped_step_curve(
+            rows, method, noise_rate, pretrain_fraction, metric, max_step=max_step
+        )
+        if not xs:
+            continue
+        plot_mean_band(ax, xs, means, ses, method)
+    if max_step is not None:
+        ax.set_xlim(left=0, right=max_step)
+    ax.set_xlabel("Selection step")
+    ax.set_ylabel(ylabel)
+    window_label = f", first {max_step:g} steps" if max_step is not None else ""
+    ax.set_title(
+        f"{title}{window_label} (noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
+    )
+    ax.grid(alpha=0.25)
+    ax.legend(fontsize=9, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)
