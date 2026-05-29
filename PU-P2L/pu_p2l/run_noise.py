@@ -70,6 +70,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--global-redundancy-weight", type=float, default=1.5)
     parser.add_argument("--consensus-weight", type=float, default=1.25)
     parser.add_argument("--noise-penalty", type=float, default=2.5)
+    parser.add_argument("--residual-rank", type=int, default=0)
+    parser.add_argument("--residual-tol", type=float, default=1e-8)
     parser.add_argument("--no-plots", action="store_true")
     return parser.parse_args()
 

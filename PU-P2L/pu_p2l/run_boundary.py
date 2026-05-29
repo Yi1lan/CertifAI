@@ -75,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--global-redundancy-weight", type=float, default=1.5)
     parser.add_argument("--consensus-weight", type=float, default=1.25)
     parser.add_argument("--noise-penalty", type=float, default=2.5)
+    parser.add_argument("--residual-rank", type=int, default=0)
+    parser.add_argument("--residual-tol", type=float, default=1e-8)
     parser.add_argument("--no-plots", action="store_true")
     return parser.parse_args()
 
@@ -143,6 +145,8 @@ def build_config(args: argparse.Namespace) -> RunConfig:
             global_redundancy_weight=args.global_redundancy_weight,
             consensus_weight=args.consensus_weight,
             noise_penalty=args.noise_penalty,
+            residual_rank=getattr(args, "residual_rank", 0),
+            residual_tol=getattr(args, "residual_tol", 1e-8),
         ),
     )
 

@@ -6,7 +6,9 @@ This folder is the cleaned implementation for the PU-P2L experiments. The older
 Implemented methods:
 
 - `MaxLoss`: standard P2L max-loss selector.
+- `Marginal`: smallest softmax top-2 margin selector.
 - `PU-C`: all-support feature novelty/redundancy selector.
+- `PU-R`: residual-novelty PU-C selector using the support-span residual.
 - `PU-F`: label-consensus PU selector.
 - `PU-G`: label-consensus PU selector with explicit noisy-label contradiction penalty.
 - `GREATS`: non-certified GREATS-style probe-gradient reference selector.

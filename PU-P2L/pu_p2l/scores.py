@@ -20,6 +20,8 @@ class ScoreConfig:
     global_redundancy_weight: float
     consensus_weight: float
     noise_penalty: float
+    residual_rank: int
+    residual_tol: float
 
 
 def row_normed(matrix: np.ndarray) -> np.ndarray:
@@ -83,6 +85,42 @@ def score_pu_c(
     max_all_feature_sim = np.max(np.maximum(all_feature_sim, 0.0), axis=1)
     novelty = 1.0 - max_all_feature_sim
     return clipped_loss + config.mu * novelty - config.global_redundancy_weight * max_all_feature_sim
+
+
+def support_span_basis(support_embeddings: np.ndarray, rank: int, tol: float) -> np.ndarray:
+    if len(support_embeddings) == 0:
+        return np.empty((support_embeddings.shape[1], 0), dtype=np.float64)
+    support_unit = row_normed(support_embeddings)
+    _, singular_values, vh = np.linalg.svd(support_unit, full_matrices=False)
+    keep = singular_values > max(float(tol), 0.0)
+    if rank > 0:
+        rank_count = min(int(rank), int(np.sum(keep)))
+    else:
+        rank_count = int(np.sum(keep))
+    if rank_count <= 0:
+        return np.empty((support_embeddings.shape[1], 0), dtype=np.float64)
+    return vh[:rank_count].T
+
+
+def score_pu_r(
+    candidate_losses: np.ndarray,
+    support_stats: ModelStats,
+    cand_stats: ModelStats,
+    config: ScoreConfig,
+) -> np.ndarray:
+    clipped_loss = np.clip(candidate_losses / config.gamma, 0.0, config.c_loss)
+    cand_unit = row_normed(cand_stats.embeddings)
+    support_unit = row_normed(support_stats.embeddings)
+    local_redundancy = np.max(np.maximum(cand_unit @ support_unit.T, 0.0), axis=1)
+
+    basis = support_span_basis(support_stats.embeddings, config.residual_rank, config.residual_tol)
+    if basis.shape[1] == 0:
+        residual_novelty = np.ones(len(candidate_losses), dtype=np.float64)
+    else:
+        projection_sq = np.sum((cand_unit @ basis) ** 2, axis=1)
+        residual_novelty = np.clip(1.0 - projection_sq, 0.0, 1.0)
+
+    return clipped_loss + config.mu * residual_novelty - config.global_redundancy_weight * local_redundancy
 
 
 def score_marginal(cand_stats: ModelStats) -> np.ndarray:

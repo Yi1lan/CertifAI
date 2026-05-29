@@ -22,14 +22,15 @@ from .scores import (
     score_greats_reference,
     score_pu_c,
     score_pu_f_or_g,
+    score_pu_r,
     tie_break_argmax,
 )
 
 
-CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G"}
+CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-C", "PU-R", "PU-F", "PU-G"}
 REFERENCE_METHODS = {"GREATS"}
-METHODS = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G", "GREATS"]
-DEFAULT_METHODS = ["MaxLoss", "PU-C", "PU-F", "PU-G", "GREATS"]
+METHODS = ["MaxLoss", "Marginal", "PU-C", "PU-R", "PU-F", "PU-G", "GREATS"]
+DEFAULT_METHODS = ["MaxLoss", "PU-C", "PU-R", "PU-F", "PU-G", "GREATS"]
 
 
 @dataclass(frozen=True)
@@ -717,6 +718,8 @@ def choose_next(
 
     if method == "PU-C":
         scores = score_pu_c(candidate, candidate_losses, support_stats, cand_stats, config.score)
+    elif method == "PU-R":
+        scores = score_pu_r(candidate_losses, support_stats, cand_stats, config.score)
     elif method == "PU-F":
         scores = score_pu_f_or_g(
             candidate, candidate_losses, support_arr, support_stats, cand_stats, pool, config.score, False

@@ -19,15 +19,16 @@ from .io_utils import read_csv, to_float
 
 COLORS = {
     "MaxLoss": "#274753",
-    "Marginal": "#7b5ea7",
     "PU-C": "#297270",
-    "PU-F": "#299d8f",
-    "PU-G": "#8ab07c",
+    "PU-R": "#299d8f",
+    "Marginal": "#8ab07c",
+    "PU-F": "#e7c66b",
+    "PU-G": "#f3a361",
     "GREATS": "#e66d50",
 }
-METHOD_ORDER = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G", "GREATS"]
-CERTIFIED_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G"]
-BOUND_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-C", "PU-F", "PU-G", "GREATS"]
+METHOD_ORDER = ["MaxLoss", "PU-R", "PU-C", "Marginal", "PU-F", "PU-G", "GREATS"]
+CERTIFIED_METHOD_ORDER = ["MaxLoss", "PU-R", "PU-C", "Marginal", "PU-F", "PU-G"]
+BOUND_METHOD_ORDER = ["MaxLoss", "PU-R", "PU-C", "Marginal", "PU-F", "PU-G", "GREATS"]
 GENERALIZATION_BOUND_CURVES = [
     ("test_error", "risk", "-", 1.8, 0.16),
     ("certified_bound", "P2L", "--", 1.7, 0.10),
