@@ -4,17 +4,25 @@ This folder is the cleaned implementation for the PU-P2L experiments. The
 older `certifai_experiments/` folder is kept as a lab/reference area.
 
 The main runbook is [`experiment_commands.md`](experiment_commands.md). It uses
-the result hierarchy:
+one training run per experiment. If `Marginal` is included in `--methods`, the
+runner still trains only once and then emits both reporting views:
 
 ```text
-results/experiments/pu_r/
-  with_marginal/
-  without_marginal/
+results/experiments/pu_r/<experiment>/
+  results.csv
+  summary.csv
+  summary_with_marginal.csv
+  summary_without_marginal.csv
+  tables/
+    with_marginal.csv
+    without_marginal.csv
+  plots/
+    with_marginal/
+    without_marginal/
 ```
 
-Every experiment should be run in both branches. The `with_marginal` branch
-includes `Marginal` and marginal-derived ablations. The `without_marginal`
-branch excludes them for the core research comparison.
+This avoids rerunning the same setting only to remove `Marginal` from a plot or
+table.
 
 ## Conda Setup
 
@@ -65,6 +73,10 @@ Certified selectors, using the P2L/P2L-ES certificate:
 
 - `MaxLoss`: original P2L max-loss selector.
 - `Marginal`: smallest softmax top-2 margin selector.
+- `EL2N`: deterministic EL2N pruning score inside the P2L loop.
+- `GraNdLast`: deterministic last-layer GraNd approximation inside the P2L loop.
+- `RHO-PretrainRef`: deterministic reducible-loss score using a frozen model
+  trained only on the pretraining split.
 - `PU-R`: clipped loss plus residual novelty minus local redundancy.
 - `PU-R-Vol`: PU-R with deterministic spectral-entropy volume adaptation.
 - `PU-R-Manifold`: PU-R with deterministic support-graph manifold adaptation.
@@ -180,7 +192,7 @@ To regenerate plots after changing style:
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/experiments/pu_r/with_marginal/binary_mnist/core_boundary \
+  --results-dir results/experiments/pu_r/binary_mnist/core_boundary \
   --kind boundary
 ```
 

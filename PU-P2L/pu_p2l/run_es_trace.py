@@ -8,7 +8,7 @@ from typing import Any
 import torch
 
 from .data import make_pretrain_split
-from .io_utils import SUMMARY_NUMERIC_FIELDS, summarize, write_csv, write_json
+from .io_utils import SUMMARY_NUMERIC_FIELDS, write_csv, write_json, write_summary_views
 from .model import resolve_device
 from .plotting import plot_es_trace
 from .runner import METHODS, run_p2l_trace
@@ -155,17 +155,12 @@ def main() -> None:
         rows.extend(trace_rows)
 
     write_csv(output_dir / "results.csv", TRACE_FIELDS, rows)
-    summary = summarize(
+    write_summary_views(
+        output_dir,
         rows,
         group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "step"],
         numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
-    summary_fields: list[str] = []
-    for row in summary:
-        for field in row:
-            if field not in summary_fields:
-                summary_fields.append(field)
-    write_csv(output_dir / "summary.csv", summary_fields, summary)
     if not args.no_plots:
         plot_es_trace(output_dir / "results.csv", output_dir / "plots")
 

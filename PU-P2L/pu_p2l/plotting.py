@@ -14,16 +14,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .data import pac_bayes_enabled_for_dataset
-from .io_utils import read_csv, to_float
+from .io_utils import MARGINAL_METHODS, read_csv, to_float
 
 
 COLORS = {
     "MaxLoss": "#274753",
     "Marginal": "#297270",
+    "EL2N": "#f3a361",
+    "GraNdLast": "#e66d50",
+    "RHO-PretrainRef": "#8ab07c",
     "PU-R": "#299d8f",
-    "PU-R-Vol": "#8ab07c",
+    "PU-R-Vol": "#7f8c8d",
     "PU-R-Manifold": "#e7c66b",
-    "GREATS": "#e66d50",
+    "GREATS": "#9467bd",
     "ClippedLoss": "#f3a361",
     "ResidualOnly": "#7f8c8d",
     "RedundancyOnly": "#9467bd",
@@ -37,6 +40,9 @@ COLORS = {
 METHOD_ORDER = [
     "MaxLoss",
     "Marginal",
+    "EL2N",
+    "GraNdLast",
+    "RHO-PretrainRef",
     "PU-R",
     "PU-R-Vol",
     "PU-R-Manifold",
@@ -71,6 +77,17 @@ def should_plot_pac_bayes(rows: list[dict[str, str]]) -> bool:
 
 def format_float_for_filename(value: float) -> str:
     return f"{value:g}".replace(".", "p").replace("-", "m")
+
+
+def method_views(methods: list[str]) -> list[tuple[str, list[str]]]:
+    with_marginal = methods
+    without_marginal = [method for method in methods if method not in MARGINAL_METHODS]
+    views = [("with_marginal", with_marginal)]
+    if without_marginal != with_marginal:
+        views.append(("without_marginal", without_marginal))
+    else:
+        views.append(("without_marginal", without_marginal))
+    return [(name, view_methods) for name, view_methods in views if view_methods]
 
 
 def annotate_minimum_step_bound(
@@ -257,50 +274,53 @@ def plot_boundary(results_path: Path, plots_dir: Path) -> None:
     methods = [method for method in METHOD_ORDER if any(row["method"] == method for row in rows)]
     noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
 
-    for noise_rate in noise_rates:
-        suffix = format_float_for_filename(noise_rate)
-        plot_certified_bound_and_risk(
-            rows,
-            methods,
-            noise_rate,
-            plots_dir / f"certified_bound_and_risk_vs_pretrain_noise_{suffix}.png",
-        )
-        plot_metric(
-            rows,
-            methods,
-            noise_rate,
-            "effective_compression_size",
-            "Effective compression size",
-            "Effective Compression Size vs Pretrain Fraction",
-            plots_dir / f"effective_compression_vs_pretrain_noise_{suffix}.png",
-        )
-        plot_metric(
-            rows,
-            methods,
-            noise_rate,
-            "runtime_sec",
-            "Runtime seconds",
-            "Runtime vs Pretrain Fraction",
-            plots_dir / f"runtime_vs_pretrain_noise_{suffix}.png",
-        )
-        plot_metric(
-            rows,
-            methods,
-            noise_rate,
-            "test_inappropriate_risk",
-            "Test inappropriate risk",
-            "Test Inappropriate Risk vs Pretrain Fraction",
-            plots_dir / f"test_inappropriate_risk_vs_pretrain_noise_{suffix}.png",
-        )
-        plot_metric(
-            rows,
-            methods,
-            noise_rate,
-            "test_error",
-            "Test top-1 error",
-            "Test Top-1 Error vs Pretrain Fraction",
-            plots_dir / f"test_error_vs_pretrain_noise_{suffix}.png",
-        )
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        for noise_rate in noise_rates:
+            suffix = format_float_for_filename(noise_rate)
+            plot_certified_bound_and_risk(
+                rows,
+                view_methods,
+                noise_rate,
+                view_dir / f"certified_bound_and_risk_vs_pretrain_noise_{suffix}.png",
+            )
+            plot_metric(
+                rows,
+                view_methods,
+                noise_rate,
+                "effective_compression_size",
+                "Effective compression size",
+                "Effective Compression Size vs Pretrain Fraction",
+                view_dir / f"effective_compression_vs_pretrain_noise_{suffix}.png",
+            )
+            plot_metric(
+                rows,
+                view_methods,
+                noise_rate,
+                "runtime_sec",
+                "Runtime seconds",
+                "Runtime vs Pretrain Fraction",
+                view_dir / f"runtime_vs_pretrain_noise_{suffix}.png",
+            )
+            plot_metric(
+                rows,
+                view_methods,
+                noise_rate,
+                "test_inappropriate_risk",
+                "Test inappropriate risk",
+                "Test Inappropriate Risk vs Pretrain Fraction",
+                view_dir / f"test_inappropriate_risk_vs_pretrain_noise_{suffix}.png",
+            )
+            plot_metric(
+                rows,
+                view_methods,
+                noise_rate,
+                "test_error",
+                "Test top-1 error",
+                "Test Top-1 Error vs Pretrain Fraction",
+                view_dir / f"test_error_vs_pretrain_noise_{suffix}.png",
+            )
 
 
 def plot_generalization_bounds(results_path: Path, plots_dir: Path) -> None:
@@ -309,14 +329,17 @@ def plot_generalization_bounds(results_path: Path, plots_dir: Path) -> None:
     methods = [method for method in METHOD_ORDER if any(row["method"] == method for row in rows)]
     noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
 
-    for noise_rate in noise_rates:
-        suffix = format_float_for_filename(noise_rate)
-        plot_generalization_bound_and_risk(
-            rows,
-            methods,
-            noise_rate,
-            plots_dir / f"generalization_bounds_vs_pretrain_noise_{suffix}.png",
-        )
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        for noise_rate in noise_rates:
+            suffix = format_float_for_filename(noise_rate)
+            plot_generalization_bound_and_risk(
+                rows,
+                view_methods,
+                noise_rate,
+                view_dir / f"generalization_bounds_vs_pretrain_noise_{suffix}.png",
+            )
 
 
 def plot_generalization_bound_and_risk(
@@ -451,16 +474,19 @@ def plot_es_budget_boundary(results_path: Path, plots_dir: Path) -> None:
     noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
     budgets = sorted({int(to_float(row, "es_budget")) for row in rows})
 
-    for noise_rate in noise_rates:
-        noise_suffix = format_float_for_filename(noise_rate)
-        for budget in budgets:
-            plot_es_budget_bound_and_risk_vs_pretrain(
-                rows,
-                methods,
-                noise_rate,
-                budget,
-                plots_dir / f"es_budget_bound_and_risk_vs_pretrain_noise_{noise_suffix}_budget_{budget}.png",
-            )
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        for noise_rate in noise_rates:
+            noise_suffix = format_float_for_filename(noise_rate)
+            for budget in budgets:
+                plot_es_budget_bound_and_risk_vs_pretrain(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    budget,
+                    view_dir / f"es_budget_bound_and_risk_vs_pretrain_noise_{noise_suffix}_budget_{budget}.png",
+                )
 
 
 def plot_es_budget_bound_and_risk_vs_pretrain(
@@ -539,92 +565,95 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
     noise_rates = sorted({to_float(row, "noise_rate") for row in rows})
     pretrain_fractions = sorted({to_float(row, "pretrain_fraction") for row in rows})
 
-    for noise_rate in noise_rates:
-        noise_suffix = format_float_for_filename(noise_rate)
-        for pretrain_fraction in pretrain_fractions:
-            pretrain_suffix = format_float_for_filename(pretrain_fraction)
-            plot_step_bound_and_risk(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                plots_dir
-                / f"es_bound_and_risk_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-                boundary_only=True,
-            )
-            plot_step_bound_and_risk(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                plots_dir
-                / f"es_bound_and_risk_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-                max_step=100,
-            )
-            plot_step_metric(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                "remaining_bad",
-                "Inappropriate points left",
-                "Inappropriate Points Left vs Step",
-                plots_dir / f"remaining_bad_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-            )
-            plot_step_metric(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                "remaining_bad",
-                "Inappropriate points left",
-                "Inappropriate Points Left vs Step",
-                plots_dir / f"remaining_bad_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-                max_step=100,
-            )
-            plot_step_metric(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                "effective_compression_size",
-                "ES effective compression size",
-                "ES Effective Compression Size vs Step",
-                plots_dir
-                / f"effective_compression_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-            )
-            plot_step_metric(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                "effective_compression_size",
-                "ES effective compression size",
-                "ES Effective Compression Size vs Step",
-                plots_dir
-                / f"effective_compression_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-                max_step=100,
-            )
-            plot_step_metric(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                "spectral_entropy",
-                "Support spectral entropy",
-                "Support Spectral Entropy vs Step",
-                plots_dir / f"spectral_entropy_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-            )
-            plot_step_metric(
-                rows,
-                methods,
-                noise_rate,
-                pretrain_fraction,
-                "dynamic_mu",
-                "Dynamic novelty weight",
-                "Dynamic Novelty Weight vs Step",
-                plots_dir / f"dynamic_mu_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-            )
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        for noise_rate in noise_rates:
+            noise_suffix = format_float_for_filename(noise_rate)
+            for pretrain_fraction in pretrain_fractions:
+                pretrain_suffix = format_float_for_filename(pretrain_fraction)
+                plot_step_bound_and_risk(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    view_dir
+                    / f"es_bound_and_risk_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    boundary_only=True,
+                )
+                plot_step_bound_and_risk(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    view_dir
+                    / f"es_bound_and_risk_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    max_step=100,
+                )
+                plot_step_metric(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    "remaining_bad",
+                    "Inappropriate points left",
+                    "Inappropriate Points Left vs Step",
+                    view_dir / f"remaining_bad_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_step_metric(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    "remaining_bad",
+                    "Inappropriate points left",
+                    "Inappropriate Points Left vs Step",
+                    view_dir / f"remaining_bad_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    max_step=100,
+                )
+                plot_step_metric(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    "effective_compression_size",
+                    "ES effective compression size",
+                    "ES Effective Compression Size vs Step",
+                    view_dir
+                    / f"effective_compression_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_step_metric(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    "effective_compression_size",
+                    "ES effective compression size",
+                    "ES Effective Compression Size vs Step",
+                    view_dir
+                    / f"effective_compression_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    max_step=100,
+                )
+                plot_step_metric(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    "spectral_entropy",
+                    "Support spectral entropy",
+                    "Support Spectral Entropy vs Step",
+                    view_dir / f"spectral_entropy_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_step_metric(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    "dynamic_mu",
+                    "Dynamic novelty weight",
+                    "Dynamic Novelty Weight vs Step",
+                    view_dir / f"dynamic_mu_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                )
 
 
 def plot_step_bound_and_risk(
@@ -757,36 +786,39 @@ def plot_es_budget_noise(results_path: Path, plots_dir: Path) -> None:
     budgets = sorted({int(to_float(row, "es_budget")) for row in rows})
     pretrain_fractions = sorted({to_float(row, "pretrain_fraction") for row in rows})
 
-    for pretrain_fraction in pretrain_fractions:
-        pretrain_suffix = format_float_for_filename(pretrain_fraction)
-        for budget in budgets:
-            plot_es_budget_noise_metric(
-                rows,
-                methods,
-                budget,
-                pretrain_fraction,
-                "effective_compression_size",
-                "ES effective compression size",
-                f"ES Effective Compression Size vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
-                plots_dir / f"es_budget_effective_compression_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
-            )
-            plot_es_budget_noise_metric(
-                rows,
-                methods,
-                budget,
-                pretrain_fraction,
-                "test_inappropriate_risk",
-                "Test inappropriate risk",
-                f"Test Inappropriate Risk vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
-                plots_dir / f"es_budget_test_risk_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
-            )
-            plot_es_budget_bounds_vs_noise(
-                rows,
-                methods,
-                budget,
-                pretrain_fraction,
-                plots_dir / f"es_budget_bounds_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
-            )
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        for pretrain_fraction in pretrain_fractions:
+            pretrain_suffix = format_float_for_filename(pretrain_fraction)
+            for budget in budgets:
+                plot_es_budget_noise_metric(
+                    rows,
+                    view_methods,
+                    budget,
+                    pretrain_fraction,
+                    "effective_compression_size",
+                    "ES effective compression size",
+                    f"ES Effective Compression Size vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
+                    view_dir / f"es_budget_effective_compression_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_es_budget_noise_metric(
+                    rows,
+                    view_methods,
+                    budget,
+                    pretrain_fraction,
+                    "test_inappropriate_risk",
+                    "Test inappropriate risk",
+                    f"Test Inappropriate Risk vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
+                    view_dir / f"es_budget_test_risk_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_es_budget_bounds_vs_noise(
+                    rows,
+                    view_methods,
+                    budget,
+                    pretrain_fraction,
+                    view_dir / f"es_budget_bounds_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
+                )
 
 
 def plot_es_budget_bounds_vs_noise(
@@ -860,32 +892,35 @@ def plot_noise(results_path: Path, plots_dir: Path) -> None:
     rows = read_csv(results_path)
     methods = [method for method in METHOD_ORDER if any(row["method"] == method for row in rows)]
 
-    plot_noise_metric(
-        rows,
-        methods,
-        "test_error",
-        "Clean test error",
-        "Clean Test Error vs Label-Noise Rate",
-        plots_dir / "test_error_vs_noise.png",
-    )
-    plot_noise_metric(
-        rows,
-        methods,
-        "test_inappropriate_risk",
-        "Test inappropriate risk",
-        "Test Inappropriate Risk vs Label-Noise Rate",
-        plots_dir / "test_inappropriate_risk_vs_noise.png",
-    )
-    plot_noise_metric(
-        rows,
-        methods,
-        "compression_size",
-        "Compression set size",
-        "Compression Set Size vs Label-Noise Rate",
-        plots_dir / "compression_size_vs_noise.png",
-    )
-    plot_noise_bounds_vs_noise(rows, methods, plots_dir / "bounds_vs_noise.png")
-    plot_redundancy_diagnostics(rows, methods, plots_dir / "redundancy_diagnostics_vs_noise.png")
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        plot_noise_metric(
+            rows,
+            view_methods,
+            "test_error",
+            "Clean test error",
+            "Clean Test Error vs Label-Noise Rate",
+            view_dir / "test_error_vs_noise.png",
+        )
+        plot_noise_metric(
+            rows,
+            view_methods,
+            "test_inappropriate_risk",
+            "Test inappropriate risk",
+            "Test Inappropriate Risk vs Label-Noise Rate",
+            view_dir / "test_inappropriate_risk_vs_noise.png",
+        )
+        plot_noise_metric(
+            rows,
+            view_methods,
+            "compression_size",
+            "Compression set size",
+            "Compression Set Size vs Label-Noise Rate",
+            view_dir / "compression_size_vs_noise.png",
+        )
+        plot_noise_bounds_vs_noise(rows, view_methods, view_dir / "bounds_vs_noise.png")
+        plot_redundancy_diagnostics(rows, view_methods, view_dir / "redundancy_diagnostics_vs_noise.png")
 
 
 def plot_noise_bounds_vs_noise(

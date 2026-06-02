@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import random
 import time
 from dataclasses import dataclass
@@ -21,11 +22,14 @@ from .scores import (
     normalized_spectral_entropy,
     row_normed,
     score_ablation,
+    score_el2n,
+    score_grand_last,
     score_marginal,
     score_greats_reference,
     score_pu_r,
     score_pu_r_manifold,
     score_pu_r_vol,
+    score_rho_pretrain_ref,
     support_span_basis,
     tie_break_argmax,
 )
@@ -42,11 +46,23 @@ ABLATION_METHODS = {
     "Marginal-Redundancy",
     "Marginal+Residual-Redundancy",
 }
-CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", *ABLATION_METHODS}
+PRUNING_METHODS = {"EL2N", "GraNdLast", "RHO-PretrainRef"}
+CERTIFIED_METHODS = {
+    "MaxLoss",
+    "Marginal",
+    "PU-R",
+    "PU-R-Vol",
+    "PU-R-Manifold",
+    *ABLATION_METHODS,
+    *PRUNING_METHODS,
+}
 REFERENCE_METHODS = {"GREATS"}
 METHODS = [
     "MaxLoss",
     "Marginal",
+    "EL2N",
+    "GraNdLast",
+    "RHO-PretrainRef",
     "PU-R",
     "PU-R-Vol",
     "PU-R-Manifold",
@@ -101,6 +117,14 @@ def set_all_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def frozen_reference_model(model: nn.Module) -> nn.Module:
+    reference = copy.deepcopy(model)
+    reference.eval()
+    for param in reference.parameters():
+        param.requires_grad_(False)
+    return reference
 
 
 def deterministic_probe(pool: CertPool, split: SplitBundle, count: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
@@ -322,6 +346,7 @@ def run_p2l_method(
             nesterov=config.nesterov,
         )
     prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
+    reference_model = frozen_reference_model(model) if method == "RHO-PretrainRef" else None
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     support_set = set(support)
@@ -373,7 +398,19 @@ def run_p2l_method(
 
         bad_candidates = non_support[bad_local]
         bad_losses = losses[bad_local]
-        chosen = choose_next(method, model, split.pool, support, bad_candidates, bad_losses, config, device, probe_x, probe_y)
+        chosen = choose_next(
+            method,
+            model,
+            split.pool,
+            support,
+            bad_candidates,
+            bad_losses,
+            config,
+            device,
+            probe_x,
+            probe_y,
+            reference_model,
+        )
         support.append(chosen)
         support_set.add(chosen)
 
@@ -447,6 +484,7 @@ def run_p2l_trace(
             nesterov=config.nesterov,
         )
     prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
+    reference_model = frozen_reference_model(model) if method == "RHO-PretrainRef" else None
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     initial_support_size = len(support)
@@ -547,7 +585,19 @@ def run_p2l_trace(
 
         bad_candidates = non_support[bad_local]
         bad_losses = losses[bad_local]
-        chosen = choose_next(method, model, split.pool, support, bad_candidates, bad_losses, config, device, probe_x, probe_y)
+        chosen = choose_next(
+            method,
+            model,
+            split.pool,
+            support,
+            bad_candidates,
+            bad_losses,
+            config,
+            device,
+            probe_x,
+            probe_y,
+            reference_model,
+        )
         support.append(chosen)
         support_set.add(chosen)
 
@@ -589,6 +639,7 @@ def run_p2l_es_budgets(
             nesterov=config.nesterov,
         )
     prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
+    reference_model = frozen_reference_model(model) if method == "RHO-PretrainRef" else None
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     initial_support_size = len(support)
@@ -701,7 +752,19 @@ def run_p2l_es_budgets(
 
         bad_candidates = non_support[bad_local]
         bad_losses = losses[bad_local]
-        chosen = choose_next(method, model, split.pool, support, bad_candidates, bad_losses, config, device, probe_x, probe_y)
+        chosen = choose_next(
+            method,
+            model,
+            split.pool,
+            support,
+            bad_candidates,
+            bad_losses,
+            config,
+            device,
+            probe_x,
+            probe_y,
+            reference_model,
+        )
         support.append(chosen)
         support_set.add(chosen)
 
@@ -811,16 +874,35 @@ def choose_next(
     device: torch.device,
     probe_x: np.ndarray,
     probe_y: np.ndarray,
+    reference_model: nn.Module | None = None,
 ) -> int:
     if method == "MaxLoss":
         return tie_break_argmax(candidate, candidate_losses, pool.sample_id)
-    if method != "Marginal" and not support:
+    if method not in {"Marginal", *PRUNING_METHODS} and not support:
         return tie_break_argmax(candidate, candidate_losses, pool.sample_id)
 
     cand_stats = model_stats(model, pool.x[candidate], pool.y[candidate], device, config.inference_batch_size)
 
     if method == "Marginal":
         scores = score_marginal(cand_stats)
+        return tie_break_argmax(candidate, scores, pool.sample_id)
+    if method == "EL2N":
+        scores = score_el2n(cand_stats)
+        return tie_break_argmax(candidate, scores, pool.sample_id)
+    if method == "GraNdLast":
+        scores = score_grand_last(cand_stats)
+        return tie_break_argmax(candidate, scores, pool.sample_id)
+    if method == "RHO-PretrainRef":
+        if reference_model is None:
+            raise ValueError("RHO-PretrainRef requires a frozen pretrained reference model.")
+        reference_losses = compute_losses(
+            reference_model,
+            pool.x[candidate],
+            pool.y[candidate],
+            device,
+            config.inference_batch_size,
+        )
+        scores = score_rho_pretrain_ref(candidate_losses, reference_losses)
         return tie_break_argmax(candidate, scores, pool.sample_id)
 
     support_arr = np.asarray(support, dtype=np.int64)

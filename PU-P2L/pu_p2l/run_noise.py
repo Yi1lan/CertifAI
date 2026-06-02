@@ -8,7 +8,7 @@ from typing import Any
 import torch
 
 from .data import make_pretrain_split
-from .io_utils import RESULT_FIELDS, SUMMARY_NUMERIC_FIELDS, summarize, write_csv, write_json
+from .io_utils import RESULT_FIELDS, SUMMARY_NUMERIC_FIELDS, write_csv, write_json, write_summary_views
 from .model import resolve_device
 from .plotting import plot_noise
 from .runner import DEFAULT_METHODS, METHODS, run_p2l_method
@@ -98,17 +98,12 @@ def main() -> None:
         rows.append(row)
 
     write_csv(output_dir / "results.csv", RESULT_FIELDS, rows)
-    summary = summarize(
+    write_summary_views(
+        output_dir,
         rows,
         group_fields=["dataset", "method", "noise_rate"],
         numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
-    summary_fields: list[str] = []
-    for row in summary:
-        for field in row:
-            if field not in summary_fields:
-                summary_fields.append(field)
-    write_csv(output_dir / "summary.csv", summary_fields, summary)
     if not args.no_plots:
         plot_noise(output_dir / "results.csv", output_dir / "plots")
 

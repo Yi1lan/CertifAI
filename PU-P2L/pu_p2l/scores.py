@@ -251,6 +251,20 @@ def score_marginal(cand_stats: ModelStats) -> np.ndarray:
     return -cand_stats.margins
 
 
+def score_el2n(cand_stats: ModelStats) -> np.ndarray:
+    return np.linalg.norm(cand_stats.errors, axis=1)
+
+
+def score_grand_last(cand_stats: ModelStats) -> np.ndarray:
+    embedding_norm = np.linalg.norm(cand_stats.embeddings, axis=1)
+    error_norm = np.linalg.norm(cand_stats.errors, axis=1)
+    return embedding_norm * error_norm
+
+
+def score_rho_pretrain_ref(candidate_losses: np.ndarray, reference_losses: np.ndarray) -> np.ndarray:
+    return np.maximum(candidate_losses - reference_losses, 0.0)
+
+
 def score_greats_reference(
     cand_stats: ModelStats,
     probe_stats: ModelStats,

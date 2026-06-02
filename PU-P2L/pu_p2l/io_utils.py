@@ -76,6 +76,13 @@ SUMMARY_NUMERIC_FIELDS = [
     "dynamic_mu",
 ]
 
+MARGINAL_METHODS = {
+    "Marginal",
+    "Marginal+Residual",
+    "Marginal-Redundancy",
+    "Marginal+Residual-Redundancy",
+}
+
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
     with path.open("w") as handle:
@@ -133,3 +140,38 @@ def summarize(rows: list[dict[str, Any]], group_fields: list[str], numeric_field
                 out[f"{field}_se"] = ""
         output.append(out)
     return output
+
+
+def summary_fields(summary: list[dict[str, Any]]) -> list[str]:
+    fields: list[str] = []
+    for row in summary:
+        for field in row:
+            if field not in fields:
+                fields.append(field)
+    return fields
+
+
+def without_marginal_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if row.get("method") not in MARGINAL_METHODS]
+
+
+def write_summary_views(
+    output_dir: Path,
+    rows: list[dict[str, Any]],
+    group_fields: list[str],
+    numeric_fields: list[str],
+) -> None:
+    summary = summarize(rows, group_fields=group_fields, numeric_fields=numeric_fields)
+    fields = summary_fields(summary)
+    write_csv(output_dir / "summary.csv", fields, summary)
+    write_csv(output_dir / "summary_with_marginal.csv", fields, summary)
+
+    filtered = without_marginal_rows(rows)
+    summary_no_marginal = summarize(filtered, group_fields=group_fields, numeric_fields=numeric_fields)
+    fields_no_marginal = summary_fields(summary_no_marginal)
+    write_csv(output_dir / "summary_without_marginal.csv", fields_no_marginal, summary_no_marginal)
+
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    write_csv(tables_dir / "with_marginal.csv", fields, summary)
+    write_csv(tables_dir / "without_marginal.csv", fields_no_marginal, summary_no_marginal)

@@ -11,7 +11,7 @@ import torch
 
 from .bounds import p2l_bound
 from .data import deterministic_initial_support, make_pretrain_split, stable_seed
-from .io_utils import summarize, write_csv, write_json
+from .io_utils import write_csv, write_json, write_summary_views
 from .model import compute_losses, eval_error, eval_inappropriate_risk, resolve_device, train_model
 from .adaptive_generalization_bounds import ada_clipped_gaussian_bound, self_selected_generalization_bound
 from .plotting import plot_generalization_bounds
@@ -21,6 +21,7 @@ from .runner import (
     METHODS,
     choose_next,
     deterministic_probe,
+    frozen_reference_model,
     make_run_model,
     pac_bayes_parameter_names,
     pac_bayes_stats,
@@ -361,6 +362,7 @@ def run_generalization_method(
             nesterov=config.nesterov,
         )
     prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
+    reference_model = frozen_reference_model(model) if method == "RHO-PretrainRef" else None
 
     support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
     initial_support_size = len(support)
@@ -415,7 +417,19 @@ def run_generalization_method(
 
         bad_candidates = non_support[bad_local]
         bad_losses = losses[bad_local]
-        chosen = choose_next(method, model, split.pool, support, bad_candidates, bad_losses, config, device, probe_x, probe_y)
+        chosen = choose_next(
+            method,
+            model,
+            split.pool,
+            support,
+            bad_candidates,
+            bad_losses,
+            config,
+            device,
+            probe_x,
+            probe_y,
+            reference_model,
+        )
         support.append(chosen)
         support_set.add(chosen)
 
@@ -507,17 +521,12 @@ def main() -> None:
         for field in GENERALIZATION_FIELDS
         if field not in {"method", "dataset", "seed", "noise_rate", "pretrain_fraction"}
     ]
-    summary = summarize(
+    write_summary_views(
+        output_dir,
         rows,
         group_fields=["dataset", "method", "noise_rate", "pretrain_fraction"],
         numeric_fields=numeric_fields,
     )
-    summary_fields: list[str] = []
-    for row in summary:
-        for field in row:
-            if field not in summary_fields:
-                summary_fields.append(field)
-    write_csv(output_dir / "summary.csv", summary_fields, summary)
     if not args.no_plots:
         plot_generalization_bounds(output_dir / "results.csv", output_dir / "plots")
 
