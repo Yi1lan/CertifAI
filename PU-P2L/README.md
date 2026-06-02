@@ -1,29 +1,26 @@
-# PU-P2L Thesis Experiments
+# PU-P2L Experiments
 
-This folder is the cleaned implementation for the PU-P2L thesis experiments.
-The older `certifai_experiments/` folder is kept as a lab/reference area.
+This folder is the cleaned implementation for the PU-P2L experiments. The
+older `certifai_experiments/` folder is kept as a lab/reference area.
 
-The authoritative runbook for the thesis package is
-[`thesis_experiment_commands.md`](thesis_experiment_commands.md). It contains
-all experiment commands under the hierarchy:
+The main runbook is [`experiment_commands.md`](experiment_commands.md). It uses
+the result hierarchy:
 
 ```text
-results/thesis_v2/
+results/experiments/pu_r/
   with_marginal/
   without_marginal/
 ```
 
-Every thesis experiment should be run in both versions. The `with_marginal`
-branch includes `Marginal` and marginal-derived ablations; the
-`without_marginal` branch excludes them so the thesis can present a published
-core comparison if Marginal is not used explicitly.
+Every experiment should be run in both branches. The `with_marginal` branch
+includes `Marginal` and marginal-derived ablations. The `without_marginal`
+branch excludes them for the core research comparison.
 
 ## Conda Setup
 
 Run setup from the repository root, not from inside `PU-P2L/`.
 
 ```bash
-cd /Users/yi1lan/Desktop/CertifAI
 conda env create -f environment.yml
 conda activate certifai-experiments
 ```
@@ -31,7 +28,6 @@ conda activate certifai-experiments
 If the environment already exists:
 
 ```bash
-cd /Users/yi1lan/Desktop/CertifAI
 conda env update -f environment.yml --prune
 conda activate certifai-experiments
 ```
@@ -47,6 +43,21 @@ All commands assume:
 ```bash
 export PYTHONPATH=PU-P2L
 ```
+
+## Experiment Scale
+
+The current runbook uses larger research-sized pools rather than debug-sized
+1000-sample settings:
+
+- Binary MNIST, MNIST10, Fashion-MNIST, rotated image datasets: `n_train=5000`
+- CIFAR-10 reduced: `n_train=5000`
+- Two-moons: `n_train=3000`
+- Large sensitivity grids: `n_train=3000`
+- Image test sets: `n_test=10000`
+
+The larger pool is important for redundancy, noisy-point, and mode-coverage
+diagnostics; with too few certification samples, the selector pathologies are
+under-populated and the comparison can become uninformative.
 
 ## Implemented Methods
 
@@ -144,7 +155,8 @@ certificate. `test_error` is still recorded for standard ML interpretation.
 ## PAC-Bayes
 
 PAC-Bayes is enabled for image-style datasets when `--pac-bayes-samples > 0`.
-The default thesis commands use a Gaussian posterior over the classifier head:
+The default experiment commands use a Gaussian posterior over the classifier
+head:
 
 ```bash
 --pac-bayes-samples 50 --pac-bayes-train-epochs 1 --pac-bayes-scope head
@@ -168,36 +180,20 @@ To regenerate plots after changing style:
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/thesis_v2/with_marginal/binary_mnist/core_boundary \
+  --results-dir results/experiments/pu_r/with_marginal/binary_mnist/core_boundary \
   --kind boundary
 ```
 
 Valid `--kind` values are `boundary`, `noise`, `es_trace`,
 `es_budget_boundary`, `es_budget_noise`, and `generalization_bounds`.
 
-## Thesis Runbook
+## Runbook
 
 Run commands one by one from:
 
 ```text
-PU-P2L/thesis_experiment_commands.md
+PU-P2L/experiment_commands.md
 ```
 
-The command file follows the refined thesis plan:
-
-1. Binary MNIST core certificate comparison.
-2. Literature/generalization-bound comparison.
-3. Mode-imbalanced MNIST for PU-R vs Marginal mechanism.
-4. Boundary-duplicate augmentation.
-5. PU-R ablations.
-6. PU-R hyperparameter sensitivity.
-7. Noisy binary MNIST.
-8. MNIST 10-class.
-9. Fashion-MNIST and PU-R-Vol.
-10. Rotated-MNIST and PU-R-Manifold.
-11. Two-moons manifold diagnostic.
-12. Optional CIFAR-10 reduced.
-13. Optional rotated Fashion-MNIST.
-
 The raw CSV and `summary.csv` files contain the runtime and compression fields
-needed for thesis tables.
+needed for result tables.
