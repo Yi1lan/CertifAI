@@ -66,17 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--greats-probe-size", type=int, default=64)
     add_pac_bayes_args(parser, default_samples=0)
 
-    parser.add_argument("--r-h", type=int, default=5)
-    parser.add_argument("--r-consensus", type=int, default=10)
-    parser.add_argument("--c-loss", type=float, default=3.0)
-    parser.add_argument("--alpha", type=float, default=0.5)
-    parser.add_argument("--mu", type=float, default=0.25)
-    parser.add_argument("--lambda-redundancy", type=float, default=1.0)
-    parser.add_argument("--global-redundancy-weight", type=float, default=1.5)
-    parser.add_argument("--consensus-weight", type=float, default=1.25)
-    parser.add_argument("--noise-penalty", type=float, default=2.5)
-    parser.add_argument("--residual-rank", type=int, default=0)
-    parser.add_argument("--residual-tol", type=float, default=1e-8)
+    add_score_args(parser)
     parser.add_argument("--no-plots", action="store_true")
     return parser.parse_args()
 
@@ -97,6 +87,24 @@ def add_pac_bayes_args(parser: argparse.ArgumentParser, default_samples: int) ->
     parser.add_argument("--pac-bayes-batch-size", type=int, default=0)
     parser.add_argument("--pac-bayes-kl-weight", type=float, default=1.0)
     parser.add_argument("--pac-bayes-scope", type=str, default="head", choices=["head", "all"])
+
+
+def add_score_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--c-loss", type=float, default=3.0)
+    parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.5,
+        help="PU-R-Vol entropy boost. Larger values emphasize residual novelty when support spectral entropy is low.",
+    )
+    parser.add_argument("--mu", type=float, default=0.25)
+    parser.add_argument("--lambda-redundancy", type=float, default=1.0)
+    parser.add_argument("--global-redundancy-weight", type=float, default=1.5)
+    parser.add_argument("--residual-rank", type=int, default=0)
+    parser.add_argument("--residual-tol", type=float, default=1e-8)
+    parser.add_argument("--manifold-k", type=int, default=10)
+    parser.add_argument("--manifold-tau", type=float, default=0.5)
+    parser.add_argument("--manifold-eigenvectors", type=int, default=16)
 
 
 def build_config(args: argparse.Namespace) -> RunConfig:
@@ -137,16 +145,15 @@ def build_config(args: argparse.Namespace) -> RunConfig:
         score=ScoreConfig(
             gamma=args.gamma,
             c_loss=args.c_loss,
-            r_h=args.r_h,
-            r_consensus=args.r_consensus,
             alpha=args.alpha,
             mu=args.mu,
             lambda_redundancy=args.lambda_redundancy,
             global_redundancy_weight=args.global_redundancy_weight,
-            consensus_weight=args.consensus_weight,
-            noise_penalty=args.noise_penalty,
             residual_rank=getattr(args, "residual_rank", 0),
             residual_tol=getattr(args, "residual_tol", 1e-8),
+            manifold_k=getattr(args, "manifold_k", 10),
+            manifold_tau=getattr(args, "manifold_tau", 0.5),
+            manifold_eigenvectors=getattr(args, "manifold_eigenvectors", 16),
         ),
     )
 

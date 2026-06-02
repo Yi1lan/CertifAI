@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .data import CertPool
 from .model import ModelStats
 
 
@@ -12,16 +11,15 @@ from .model import ModelStats
 class ScoreConfig:
     gamma: float
     c_loss: float
-    r_h: int
-    r_consensus: int
     alpha: float
     mu: float
     lambda_redundancy: float
     global_redundancy_weight: float
-    consensus_weight: float
-    noise_penalty: float
     residual_rank: int
     residual_tol: float
+    manifold_k: int
+    manifold_tau: float
+    manifold_eigenvectors: int
 
 
 def row_normed(matrix: np.ndarray) -> np.ndarray:
@@ -50,43 +48,6 @@ def tie_break_argmax(candidate: np.ndarray, scores: np.ndarray, sample_id: np.nd
     return int(candidate[int(order[0])])
 
 
-def label_support_scores(
-    candidate: np.ndarray,
-    support_arr: np.ndarray,
-    support_stats: ModelStats,
-    cand_stats: ModelStats,
-    pool: CertPool,
-    config: ScoreConfig,
-) -> tuple[np.ndarray, np.ndarray]:
-    easy_count = min(max(config.r_consensus, 1), len(support_arr))
-    easy_local = np.lexsort((pool.sample_id[support_arr], support_stats.losses))[:easy_count]
-    easy_emb = support_stats.embeddings[easy_local]
-    easy_labels = pool.y[support_arr[easy_local]]
-    sim = np.maximum(cosine_matrix(cand_stats.embeddings, easy_emb), 0.0)
-    same_scores = np.zeros(len(candidate), dtype=np.float64)
-    opposite_scores = np.zeros(len(candidate), dtype=np.float64)
-    for idx, label in enumerate(pool.y[candidate]):
-        same = easy_labels == label
-        opposite = ~same
-        same_scores[idx] = float(np.max(sim[idx, same])) if np.any(same) else 0.0
-        opposite_scores[idx] = float(np.max(sim[idx, opposite])) if np.any(opposite) else 0.0
-    return same_scores, opposite_scores
-
-
-def score_pu_c(
-    candidate: np.ndarray,
-    candidate_losses: np.ndarray,
-    support_stats: ModelStats,
-    cand_stats: ModelStats,
-    config: ScoreConfig,
-) -> np.ndarray:
-    clipped_loss = np.clip(candidate_losses / config.gamma, 0.0, config.c_loss)
-    all_feature_sim = cosine_matrix(cand_stats.embeddings, support_stats.embeddings)
-    max_all_feature_sim = np.max(np.maximum(all_feature_sim, 0.0), axis=1)
-    novelty = 1.0 - max_all_feature_sim
-    return clipped_loss + config.mu * novelty - config.global_redundancy_weight * max_all_feature_sim
-
-
 def support_span_basis(support_embeddings: np.ndarray, rank: int, tol: float) -> np.ndarray:
     if len(support_embeddings) == 0:
         return np.empty((support_embeddings.shape[1], 0), dtype=np.float64)
@@ -102,16 +63,19 @@ def support_span_basis(support_embeddings: np.ndarray, rank: int, tol: float) ->
     return vh[:rank_count].T
 
 
-def score_pu_r(
+def residual_score_terms(
     candidate_losses: np.ndarray,
     support_stats: ModelStats,
     cand_stats: ModelStats,
     config: ScoreConfig,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     clipped_loss = np.clip(candidate_losses / config.gamma, 0.0, config.c_loss)
     cand_unit = row_normed(cand_stats.embeddings)
     support_unit = row_normed(support_stats.embeddings)
-    local_redundancy = np.max(np.maximum(cand_unit @ support_unit.T, 0.0), axis=1)
+    if len(support_unit) == 0:
+        local_redundancy = np.zeros(len(candidate_losses), dtype=np.float64)
+    else:
+        local_redundancy = np.max(np.maximum(cand_unit @ support_unit.T, 0.0), axis=1)
 
     basis = support_span_basis(support_stats.embeddings, config.residual_rank, config.residual_tol)
     if basis.shape[1] == 0:
@@ -120,54 +84,138 @@ def score_pu_r(
         projection_sq = np.sum((cand_unit @ basis) ** 2, axis=1)
         residual_novelty = np.clip(1.0 - projection_sq, 0.0, 1.0)
 
+    return clipped_loss, residual_novelty, local_redundancy
+
+
+def score_pu_r(
+    candidate_losses: np.ndarray,
+    support_stats: ModelStats,
+    cand_stats: ModelStats,
+    config: ScoreConfig,
+) -> np.ndarray:
+    clipped_loss, residual_novelty, local_redundancy = residual_score_terms(
+        candidate_losses, support_stats, cand_stats, config
+    )
     return clipped_loss + config.mu * residual_novelty - config.global_redundancy_weight * local_redundancy
+
+
+def normalized_spectral_entropy(support_embeddings: np.ndarray, tol: float) -> float:
+    if len(support_embeddings) <= 1:
+        return 0.0
+    singular_values = np.linalg.svd(row_normed(support_embeddings), compute_uv=False)
+    eigenvalues = singular_values**2
+    eigenvalues = eigenvalues[eigenvalues > max(float(tol), 0.0)]
+    if len(eigenvalues) <= 1:
+        return 0.0
+    probs = eigenvalues / np.sum(eigenvalues)
+    entropy = -float(np.sum(probs * np.log(np.maximum(probs, 1e-12))))
+    return float(np.clip(entropy / np.log(len(eigenvalues)), 0.0, 1.0))
+
+
+def score_pu_r_vol(
+    candidate_losses: np.ndarray,
+    support_stats: ModelStats,
+    cand_stats: ModelStats,
+    config: ScoreConfig,
+) -> np.ndarray:
+    clipped_loss, residual_novelty, local_redundancy = residual_score_terms(
+        candidate_losses, support_stats, cand_stats, config
+    )
+    spectral_entropy = normalized_spectral_entropy(support_stats.embeddings, config.residual_tol)
+    novelty_boost = max(float(config.alpha), 0.0) * (1.0 - spectral_entropy)
+    dynamic_mu = config.mu * (1.0 + novelty_boost)
+    return clipped_loss + dynamic_mu * residual_novelty - config.global_redundancy_weight * local_redundancy
+
+
+def cosine_distance(left_unit: np.ndarray, right_unit: np.ndarray) -> np.ndarray:
+    cosine = np.clip(left_unit @ right_unit.T, -1.0, 1.0)
+    return np.sqrt(np.maximum(2.0 - 2.0 * cosine, 0.0))
+
+
+def knn_affinity_from_distances(distances: np.ndarray, k: int, tau: float) -> np.ndarray:
+    if distances.size == 0:
+        return np.zeros_like(distances, dtype=np.float64)
+    k = min(max(int(k), 1), distances.shape[1])
+    tau = max(float(tau), 1e-12)
+    affinity = np.zeros_like(distances, dtype=np.float64)
+    nearest = np.argpartition(distances, kth=k - 1, axis=1)[:, :k]
+    rows = np.arange(distances.shape[0])[:, None]
+    affinity[rows, nearest] = np.exp(-distances[rows, nearest] / tau)
+    return affinity
+
+
+def support_graph_laplacian(
+    support_unit: np.ndarray,
+    k: int,
+    tau: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    support_count = len(support_unit)
+    if support_count <= 1:
+        return np.zeros((support_count,), dtype=np.float64), np.eye(support_count, dtype=np.float64)
+
+    distances = cosine_distance(support_unit, support_unit)
+    np.fill_diagonal(distances, np.inf)
+    weights = knn_affinity_from_distances(distances, min(k, support_count - 1), tau)
+    weights = np.maximum(weights, weights.T)
+    degrees = np.sum(weights, axis=1)
+    inv_sqrt_degree = np.zeros_like(degrees)
+    positive = degrees > 1e-12
+    inv_sqrt_degree[positive] = 1.0 / np.sqrt(degrees[positive])
+    normalized_adjacency = inv_sqrt_degree[:, None] * weights * inv_sqrt_degree[None, :]
+    laplacian = np.eye(support_count, dtype=np.float64) - normalized_adjacency
+    eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
+    order = np.argsort(eigenvalues)
+    return eigenvalues[order], eigenvectors[:, order]
+
+
+def score_pu_r_manifold(
+    candidate_losses: np.ndarray,
+    support_stats: ModelStats,
+    cand_stats: ModelStats,
+    config: ScoreConfig,
+) -> np.ndarray:
+    clipped_loss, residual_novelty, _ = residual_score_terms(candidate_losses, support_stats, cand_stats, config)
+    if len(support_stats.embeddings) <= 2:
+        return score_pu_r(candidate_losses, support_stats, cand_stats, config)
+
+    support_unit = row_normed(support_stats.embeddings)
+    cand_unit = row_normed(cand_stats.embeddings)
+    support_count = len(support_unit)
+    k = min(max(int(config.manifold_k), 1), support_count)
+    tau = max(float(config.manifold_tau), 1e-12)
+
+    candidate_support_dist = cosine_distance(cand_unit, support_unit)
+    direct_affinity = knn_affinity_from_distances(candidate_support_dist, k, tau)
+    affinity_sum = np.sum(direct_affinity, axis=1, keepdims=True)
+    normalized_affinity = direct_affinity / np.maximum(affinity_sum, 1e-12)
+
+    eigenvalues, eigenvectors = support_graph_laplacian(support_unit, k, tau)
+    diffusion = eigenvectors @ np.diag(np.exp(-eigenvalues / tau)) @ eigenvectors.T
+    diffusion = np.maximum(diffusion, 0.0)
+    diffusion = diffusion / np.maximum(np.max(diffusion, axis=1, keepdims=True), 1e-12)
+    geodesic_similarity = normalized_affinity @ diffusion
+    geodesic_redundancy = np.max(geodesic_similarity, axis=1)
+
+    nontrivial = np.flatnonzero(eigenvalues > max(config.residual_tol, 0.0))
+    eig_count = min(max(int(config.manifold_eigenvectors), 1), len(nontrivial))
+    if eig_count == 0:
+        geodesic_residual_novelty = residual_novelty
+    else:
+        smooth_basis = eigenvectors[:, nontrivial[:eig_count]]
+        graph_coords = normalized_affinity @ smooth_basis
+        smooth_coverage = np.sum(graph_coords**2, axis=1) * support_count / eig_count
+        smooth_coverage = np.clip(smooth_coverage, 0.0, 1.0)
+        geodesic_residual_novelty = np.clip(residual_novelty * (1.0 - smooth_coverage), 0.0, 1.0)
+
+    return (
+        clipped_loss
+        + config.mu * geodesic_residual_novelty
+        - config.global_redundancy_weight * geodesic_redundancy
+    )
 
 
 def score_marginal(cand_stats: ModelStats) -> np.ndarray:
     return -cand_stats.margins
-
-
-def score_pu_f_or_g(
-    candidate: np.ndarray,
-    candidate_losses: np.ndarray,
-    support_arr: np.ndarray,
-    support_stats: ModelStats,
-    cand_stats: ModelStats,
-    pool: CertPool,
-    config: ScoreConfig,
-    use_noise_penalty: bool,
-) -> np.ndarray:
-    clipped_loss = np.clip(candidate_losses / config.gamma, 0.0, config.c_loss)
-    all_feature_sim = cosine_matrix(cand_stats.embeddings, support_stats.embeddings)
-    max_all_feature_sim = np.max(np.maximum(all_feature_sim, 0.0), axis=1)
-    novelty = 1.0 - max_all_feature_sim
-
-    hard_count = min(config.r_h, len(support_arr))
-    hard_local = np.lexsort((pool.sample_id[support_arr], -support_stats.losses))[:hard_count]
-    kll_hard = last_layer_gradient_cosine(
-        cand_stats.embeddings,
-        cand_stats.errors,
-        support_stats.embeddings[hard_local],
-        support_stats.errors[hard_local],
-    )
-    positive_hard = np.maximum(kll_hard, 0.0)
-    hard_redundancy = np.max(positive_hard, axis=1) if positive_hard.shape[1] else 0.0
-
-    same_score, opposite_score = label_support_scores(
-        candidate, support_arr, support_stats, cand_stats, pool, config
-    )
-    consensus = same_score - opposite_score
-    scores = (
-        clipped_loss
-        + config.consensus_weight * consensus
-        + config.mu * novelty
-        - config.global_redundancy_weight * max_all_feature_sim
-        - config.lambda_redundancy * hard_redundancy
-    )
-    if use_noise_penalty:
-        contradiction = np.maximum(opposite_score - same_score, 0.0)
-        scores -= config.noise_penalty * clipped_loss * contradiction
-    return scores
 
 
 def score_greats_reference(

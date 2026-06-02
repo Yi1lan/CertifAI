@@ -12,7 +12,7 @@ from .io_utils import summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_es_budget_noise
 from .runner import METHODS, run_p2l_es_budgets
-from .run_boundary import add_pac_bayes_args, build_config, make_dataset_from_args
+from .run_boundary import add_pac_bayes_args, add_score_args, build_config, make_dataset_from_args
 from .run_es_budget_boundary import ES_BUDGET_FIELDS, ES_BUDGET_METHODS
 
 try:
@@ -63,17 +63,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--greats-probe-size", type=int, default=64)
     add_pac_bayes_args(parser, default_samples=0)
 
-    parser.add_argument("--r-h", type=int, default=5)
-    parser.add_argument("--r-consensus", type=int, default=10)
-    parser.add_argument("--c-loss", type=float, default=3.0)
-    parser.add_argument("--alpha", type=float, default=0.5)
-    parser.add_argument("--mu", type=float, default=0.25)
-    parser.add_argument("--lambda-redundancy", type=float, default=1.0)
-    parser.add_argument("--global-redundancy-weight", type=float, default=1.5)
-    parser.add_argument("--consensus-weight", type=float, default=1.25)
-    parser.add_argument("--noise-penalty", type=float, default=2.5)
-    parser.add_argument("--residual-rank", type=int, default=0)
-    parser.add_argument("--residual-tol", type=float, default=1e-8)
+    add_score_args(parser)
     parser.add_argument("--no-plots", action="store_true")
     return parser.parse_args()
 

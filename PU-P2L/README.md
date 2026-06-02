@@ -7,10 +7,9 @@ Implemented methods:
 
 - `MaxLoss`: standard P2L max-loss selector.
 - `Marginal`: smallest softmax top-2 margin selector.
-- `PU-C`: all-support feature novelty/redundancy selector.
-- `PU-R`: residual-novelty PU-C selector using the support-span residual.
-- `PU-F`: label-consensus PU selector.
-- `PU-G`: label-consensus PU selector with explicit noisy-label contradiction penalty.
+- `PU-R`: residual-novelty selector using the support-span residual.
+- `PU-R-Vol`: PU-R with a deterministic spectral-entropy volume boost.
+- `PU-R-Manifold`: PU-R with deterministic support-graph geodesic redundancy.
 - `GREATS`: non-certified GREATS-style probe-gradient reference selector.
 
 All P2L/PU methods run without an early-stopping budget. A large
@@ -83,7 +82,7 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_generalization_bounds \
   --seeds 0 1 2 3 4 \
   --noise-rates 0.0 0.4 \
   --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
-  --methods PU-G \
+  --methods PU-R-Vol \
   --n-train 3000 \
   --n-test 10000 \
   --pac-bayes-samples 50
@@ -116,7 +115,7 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_boundary \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.4 \
   --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
-  --methods MaxLoss PU-C PU-F PU-G GREATS \
+  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
   --n-train 3000 \
   --n-test 10000 \
   --duplicate-groups 40 \
@@ -128,8 +127,10 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_boundary \
   --max-total-support 600 \
   --lambda-redundancy 1.0 \
   --global-redundancy-weight 1.5 \
-  --consensus-weight 1.25 \
-  --noise-penalty 2.5
+  --residual-rank 0 \
+  --manifold-k 10 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 16
 ```
 
 Outputs:
@@ -156,7 +157,7 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_noise \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.1 0.2 0.3 0.4 \
   --pretrain-fraction 0.0 \
-  --methods MaxLoss PU-C PU-F PU-G GREATS \
+  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
   --n-train 3000 \
   --n-test 10000 \
   --duplicate-groups 40 \
@@ -168,8 +169,10 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_noise \
   --max-total-support 800 \
   --lambda-redundancy 1.0 \
   --global-redundancy-weight 1.5 \
-  --consensus-weight 1.25 \
-  --noise-penalty 2.5
+  --residual-rank 0 \
+  --manifold-k 10 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 16
 ```
 
 Outputs:
@@ -188,7 +191,7 @@ This runs the hard synthetic setting and records the clean test risk and ES
 certificate during the selection process. At each recorded step, the certificate
 uses `|T_step| + remaining_bad_step` until Stop is reached, so intermediate
 points can be interpreted as early-stopped P2L certificates. The comparison is
-shown for `MaxLoss`, `PU-C`, `PU-F`, `PU-G`, and `GREATS`; `GREATS` appears
+shown for `MaxLoss`, `Marginal`, `PU-R`, `PU-R-Vol`, `PU-R-Manifold`, and `GREATS`; `GREATS` appears
 as clean test risk only because it has no P2L compression certificate.
 
 ```bash
@@ -199,7 +202,7 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_es_trace \
   --seeds 0 1 2 3 4 5 6 7 8 9 \
   --noise-rates 0.0 0.4 \
   --pretrain-fractions 0.0 \
-  --methods MaxLoss PU-C PU-F PU-G GREATS \
+  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
   --record-every 5 \
   --n-train 3000 \
   --n-test 10000 \
@@ -212,8 +215,10 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_es_trace \
   --max-total-support 600 \
   --lambda-redundancy 1.0 \
   --global-redundancy-weight 1.5 \
-  --consensus-weight 1.25 \
-  --noise-penalty 2.5
+  --residual-rank 0 \
+  --manifold-k 10 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 16
 ```
 
 Outputs:
@@ -239,7 +244,7 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_boundary \
   --noise-rates 0.0 0.4 \
   --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
   --es-budgets 50 100 200 \
-  --methods MaxLoss PU-C PU-F PU-G GREATS \
+  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
   --n-train 3000 \
   --n-test 10000 \
   --duplicate-groups 40 \
@@ -251,8 +256,10 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_boundary \
   --max-total-support 600 \
   --lambda-redundancy 1.0 \
   --global-redundancy-weight 1.5 \
-  --consensus-weight 1.25 \
-  --noise-penalty 2.5
+  --residual-rank 0 \
+  --manifold-k 10 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 16
 ```
 
 Outputs include:
@@ -278,7 +285,7 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_noise \
   --noise-rates 0.0 0.1 0.2 0.3 0.4 \
   --pretrain-fraction 0.0 \
   --es-budgets 50 100 200 \
-  --methods MaxLoss PU-C PU-F PU-G GREATS \
+  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
   --n-train 3000 \
   --n-test 10000 \
   --duplicate-groups 40 \
@@ -290,8 +297,10 @@ PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_noise \
   --max-total-support 600 \
   --lambda-redundancy 1.0 \
   --global-redundancy-weight 1.5 \
-  --consensus-weight 1.25 \
-  --noise-penalty 2.5
+  --residual-rank 0 \
+  --manifold-k 10 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 16
 ```
 
 Outputs include:

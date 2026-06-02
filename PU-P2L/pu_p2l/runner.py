@@ -20,17 +20,17 @@ from .scores import (
     cosine_matrix,
     score_marginal,
     score_greats_reference,
-    score_pu_c,
-    score_pu_f_or_g,
     score_pu_r,
+    score_pu_r_manifold,
+    score_pu_r_vol,
     tie_break_argmax,
 )
 
 
-CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-C", "PU-R", "PU-F", "PU-G"}
+CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold"}
 REFERENCE_METHODS = {"GREATS"}
-METHODS = ["MaxLoss", "Marginal", "PU-C", "PU-R", "PU-F", "PU-G", "GREATS"]
-DEFAULT_METHODS = ["MaxLoss", "PU-C", "PU-R", "PU-F", "PU-G", "GREATS"]
+METHODS = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
+DEFAULT_METHODS = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
 
 
 @dataclass(frozen=True)
@@ -716,18 +716,12 @@ def choose_next(
     support_arr = np.asarray(support, dtype=np.int64)
     support_stats = model_stats(model, pool.x[support_arr], pool.y[support_arr], device, config.inference_batch_size)
 
-    if method == "PU-C":
-        scores = score_pu_c(candidate, candidate_losses, support_stats, cand_stats, config.score)
-    elif method == "PU-R":
+    if method == "PU-R":
         scores = score_pu_r(candidate_losses, support_stats, cand_stats, config.score)
-    elif method == "PU-F":
-        scores = score_pu_f_or_g(
-            candidate, candidate_losses, support_arr, support_stats, cand_stats, pool, config.score, False
-        )
-    elif method == "PU-G":
-        scores = score_pu_f_or_g(
-            candidate, candidate_losses, support_arr, support_stats, cand_stats, pool, config.score, True
-        )
+    elif method == "PU-R-Vol":
+        scores = score_pu_r_vol(candidate_losses, support_stats, cand_stats, config.score)
+    elif method == "PU-R-Manifold":
+        scores = score_pu_r_manifold(candidate_losses, support_stats, cand_stats, config.score)
     elif method == "GREATS":
         probe_stats = model_stats(model, probe_x, probe_y, device, config.inference_batch_size)
         scores = score_greats_reference(cand_stats, probe_stats, support_stats, config.score.lambda_redundancy)

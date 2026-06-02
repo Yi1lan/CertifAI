@@ -15,7 +15,7 @@ from .io_utils import summarize, write_csv, write_json
 from .model import compute_losses, eval_error, resolve_device, train_model
 from .adaptive_generalization_bounds import ada_clipped_gaussian_bound, self_selected_generalization_bound
 from .plotting import plot_generalization_bounds
-from .run_boundary import add_pac_bayes_args, build_config, make_dataset_from_args
+from .run_boundary import add_pac_bayes_args, add_score_args, build_config, make_dataset_from_args
 from .runner import (
     CERTIFIED_METHODS,
     METHODS,
@@ -106,7 +106,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
     )
-    parser.add_argument("--methods", type=str, nargs="+", default=["PU-G"])
+    parser.add_argument("--methods", type=str, nargs="+", default=["PU-R-Vol"])
 
     parser.add_argument("--n-train", type=int, default=3000)
     parser.add_argument("--n-test", type=int, default=10000)
@@ -137,17 +137,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--greats-probe-size", type=int, default=64)
     add_pac_bayes_args(parser, default_samples=50)
 
-    parser.add_argument("--r-h", type=int, default=5)
-    parser.add_argument("--r-consensus", type=int, default=10)
-    parser.add_argument("--c-loss", type=float, default=3.0)
-    parser.add_argument("--alpha", type=float, default=0.5)
-    parser.add_argument("--mu", type=float, default=0.25)
-    parser.add_argument("--lambda-redundancy", type=float, default=1.0)
-    parser.add_argument("--global-redundancy-weight", type=float, default=1.5)
-    parser.add_argument("--consensus-weight", type=float, default=1.25)
-    parser.add_argument("--noise-penalty", type=float, default=2.5)
-    parser.add_argument("--residual-rank", type=int, default=0)
-    parser.add_argument("--residual-tol", type=float, default=1e-8)
+    add_score_args(parser)
 
     parser.add_argument("--bound-delta", type=float, default=None)
     parser.add_argument("--ssd-empirical-risk", type=str, default="support", choices=["support", "pool"])

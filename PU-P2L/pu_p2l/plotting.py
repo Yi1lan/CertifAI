@@ -19,16 +19,15 @@ from .io_utils import read_csv, to_float
 
 COLORS = {
     "MaxLoss": "#274753",
-    "PU-C": "#297270",
+    "Marginal": "#297270",
     "PU-R": "#299d8f",
-    "Marginal": "#8ab07c",
-    "PU-F": "#e7c66b",
-    "PU-G": "#f3a361",
+    "PU-R-Vol": "#8ab07c",
+    "PU-R-Manifold": "#e7c66b",
     "GREATS": "#e66d50",
 }
-METHOD_ORDER = ["MaxLoss", "PU-R", "PU-C", "Marginal", "PU-F", "PU-G", "GREATS"]
-CERTIFIED_METHOD_ORDER = ["MaxLoss", "PU-R", "PU-C", "Marginal", "PU-F", "PU-G"]
-BOUND_METHOD_ORDER = ["MaxLoss", "PU-R", "PU-C", "Marginal", "PU-F", "PU-G", "GREATS"]
+METHOD_ORDER = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
+CERTIFIED_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold"]
+BOUND_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
 GENERALIZATION_BOUND_CURVES = [
     ("test_error", "risk", "-", 1.8, 0.16),
     ("certified_bound", "P2L", "--", 1.7, 0.10),
@@ -319,7 +318,7 @@ def plot_certified_bound_and_risk(
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
-    for method_index, method in enumerate(methods):
+    for method in methods:
         xs, means, ses = grouped_curve(rows, method, noise_rate, "test_error")
         if xs:
             plot_mean_band(
@@ -545,7 +544,7 @@ def plot_step_bound_and_risk(
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
-    for method in methods:
+    for method_index, method in enumerate(methods):
         xs, means, ses = grouped_step_curve(
             rows, method, noise_rate, pretrain_fraction, "test_error", max_step=max_step
         )
