@@ -501,6 +501,7 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
                 pretrain_fraction,
                 plots_dir
                 / f"es_bound_and_risk_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                boundary_only=True,
             )
             plot_step_bound_and_risk(
                 rows,
@@ -541,24 +542,26 @@ def plot_step_bound_and_risk(
     pretrain_fraction: float,
     path: Path,
     max_step: float | None = None,
+    boundary_only: bool = False,
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
-    show_pac_bayes = should_plot_pac_bayes(rows)
+    show_pac_bayes = (not boundary_only) and should_plot_pac_bayes(rows)
     for method_index, method in enumerate(methods):
-        xs, means, ses = grouped_step_curve(
-            rows, method, noise_rate, pretrain_fraction, "test_error", max_step=max_step
-        )
-        if xs:
-            plot_mean_band(
-                ax,
-                xs,
-                means,
-                ses,
-                method,
-                label=f"{method} risk",
-                linestyle="-",
-                alpha=0.16,
+        if not boundary_only:
+            xs, means, ses = grouped_step_curve(
+                rows, method, noise_rate, pretrain_fraction, "test_error", max_step=max_step
             )
+            if xs:
+                plot_mean_band(
+                    ax,
+                    xs,
+                    means,
+                    ses,
+                    method,
+                    label=f"{method} risk",
+                    linestyle="-",
+                    alpha=0.16,
+                )
 
         xs, means, ses = grouped_step_curve(
             rows, method, noise_rate, pretrain_fraction, "certified_bound", max_step=max_step
@@ -576,32 +579,39 @@ def plot_step_bound_and_risk(
             )
             annotate_minimum_step_bound(ax, xs, means, method, method_index)
 
-        xs, means, ses = grouped_step_curve(
-            rows, method, noise_rate, pretrain_fraction, "pac_bayes_bound", max_step=max_step
-        )
-        if show_pac_bayes and xs:
-            plot_mean_band(
-                ax,
-                xs,
-                means,
-                ses,
-                method,
-                label=f"{method} PAC-Bayes",
-                linestyle=":",
-                alpha=0.08,
+        if not boundary_only:
+            xs, means, ses = grouped_step_curve(
+                rows, method, noise_rate, pretrain_fraction, "pac_bayes_bound", max_step=max_step
             )
+            if show_pac_bayes and xs:
+                plot_mean_band(
+                    ax,
+                    xs,
+                    means,
+                    ses,
+                    method,
+                    label=f"{method} PAC-Bayes",
+                    linestyle=":",
+                    alpha=0.08,
+                )
     if max_step is not None:
         ax.set_xlim(left=0, right=max_step)
     ax.set_xlabel("Selection step")
-    ax.set_ylabel(
-        "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
-    )
+    if boundary_only:
+        ax.set_ylabel("ES P2L bound")
+    else:
+        ax.set_ylabel(
+            "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+        )
     window_label = f", first {max_step:g} steps" if max_step is not None else ""
-    title = (
-        "ES P2L/PAC-Bayes Bounds and Clean Test Risk"
-        if show_pac_bayes
-        else "ES P2L Bound and Clean Test Risk"
-    )
+    if boundary_only:
+        title = "ES P2L Bound"
+    else:
+        title = (
+            "ES P2L/PAC-Bayes Bounds and Clean Test Risk"
+            if show_pac_bayes
+            else "ES P2L Bound and Clean Test Risk"
+        )
     ax.set_title(
         f"{title} vs Step{window_label} (noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
     )
