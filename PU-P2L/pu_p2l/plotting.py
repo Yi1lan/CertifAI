@@ -49,6 +49,50 @@ def format_float_for_filename(value: float) -> str:
     return f"{value:g}".replace(".", "p").replace("-", "m")
 
 
+def annotate_minimum_step_bound(
+    ax: plt.Axes,
+    xs: list[float],
+    means: list[float],
+    method: str,
+    method_index: int,
+) -> None:
+    if not xs:
+        return
+    x_arr = np.asarray(xs, dtype=np.float64)
+    y_arr = np.asarray(means, dtype=np.float64)
+    finite = np.isfinite(x_arr) & np.isfinite(y_arr)
+    if not np.any(finite):
+        return
+    finite_positions = np.flatnonzero(finite)
+    best_pos = int(finite_positions[int(np.argmin(y_arr[finite]))])
+    best_x = float(x_arr[best_pos])
+    best_y = float(y_arr[best_pos])
+    color = COLORS.get(method, "#333333")
+    ax.scatter(
+        [best_x],
+        [best_y],
+        s=58,
+        marker="o",
+        facecolor=color,
+        edgecolor="white",
+        linewidth=1.2,
+        zorder=8,
+    )
+    offsets = [(8, 14), (8, -20), (-76, 14), (-76, -20), (8, 30), (-76, 30)]
+    offset = offsets[method_index % len(offsets)]
+    ax.annotate(
+        f"{method}\nstep={best_x:g}, bound={best_y:.3f}",
+        xy=(best_x, best_y),
+        xytext=offset,
+        textcoords="offset points",
+        fontsize=7,
+        color=color,
+        arrowprops={"arrowstyle": "->", "color": color, "lw": 0.8, "alpha": 0.8},
+        bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": color, "alpha": 0.82, "lw": 0.8},
+        zorder=9,
+    )
+
+
 def grouped_curve(
     rows: list[dict[str, str]],
     method: str,
@@ -275,7 +319,7 @@ def plot_certified_bound_and_risk(
 ) -> None:
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
-    for method in methods:
+    for method_index, method in enumerate(methods):
         xs, means, ses = grouped_curve(rows, method, noise_rate, "test_error")
         if xs:
             plot_mean_band(
@@ -531,6 +575,7 @@ def plot_step_bound_and_risk(
                 linestyle="--",
                 alpha=0.10,
             )
+            annotate_minimum_step_bound(ax, xs, means, method, method_index)
 
         xs, means, ses = grouped_step_curve(
             rows, method, noise_rate, pretrain_fraction, "pac_bayes_bound", max_step=max_step
