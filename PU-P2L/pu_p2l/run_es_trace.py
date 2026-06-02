@@ -8,11 +8,11 @@ from typing import Any
 import torch
 
 from .data import make_pretrain_split
-from .io_utils import summarize, write_csv, write_json
+from .io_utils import SUMMARY_NUMERIC_FIELDS, summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_es_trace
 from .runner import METHODS, run_p2l_trace
-from .run_boundary import add_pac_bayes_args, add_score_args, build_config, make_dataset_from_args
+from .run_boundary import add_dataset_args, add_pac_bayes_args, add_score_args, build_config, make_dataset_from_args
 
 try:
     from tqdm import tqdm
@@ -35,6 +35,7 @@ TRACE_FIELDS = [
     "effective_compression_size",
     "certified_bound",
     "test_error",
+    "test_inappropriate_risk",
     "pac_bayes_bound",
     "pac_bayes_empirical_risk",
     "pac_bayes_mc_upper",
@@ -46,6 +47,16 @@ TRACE_FIELDS = [
     "noise_hit_rate",
     "duplicate_hit_rate",
     "pairwise_feature_cosine",
+    "mean_support_redundancy",
+    "max_support_redundancy",
+    "mean_selected_residual_novelty",
+    "local_redundancy_hit_rate",
+    "residual_redundancy_hit_rate",
+    "strong_redundancy_hit_rate",
+    "mode_entropy",
+    "minority_mode_fraction",
+    "spectral_entropy",
+    "dynamic_mu",
 ]
 
 
@@ -75,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cluster-std", type=float, default=0.45)
     parser.add_argument("--band-std", type=float, default=0.35)
     parser.add_argument("--duplicate-std", type=float, default=0.015)
+    add_dataset_args(parser)
 
     parser.add_argument("--model-name", type=str, default="auto", choices=["auto", "small_mlp", "mnist_fcn", "cifar_resnet18"])
     parser.add_argument("--hidden-dim", type=int, default=64)
@@ -146,24 +158,7 @@ def main() -> None:
     summary = summarize(
         rows,
         group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "step"],
-        numeric_fields=[
-            "compression_size",
-            "remaining_bad",
-            "effective_compression_size",
-            "certified_bound",
-            "test_error",
-            "pac_bayes_bound",
-            "pac_bayes_empirical_risk",
-            "pac_bayes_mc_upper",
-            "pac_bayes_kl",
-            "runtime_sec",
-            "stop_reached",
-            "hit_limit",
-            "train_calls",
-            "noise_hit_rate",
-            "duplicate_hit_rate",
-            "pairwise_feature_cosine",
-        ],
+        numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
     summary_fields: list[str] = []
     for row in summary:

@@ -214,6 +214,39 @@ def score_pu_r_manifold(
     )
 
 
+def score_ablation(
+    method: str,
+    candidate_losses: np.ndarray,
+    support_stats: ModelStats,
+    cand_stats: ModelStats,
+    config: ScoreConfig,
+) -> np.ndarray:
+    clipped_loss, residual_novelty, local_redundancy = residual_score_terms(
+        candidate_losses, support_stats, cand_stats, config
+    )
+    margin_score = -cand_stats.margins
+    if method == "ClippedLoss":
+        return clipped_loss
+    if method == "ResidualOnly":
+        return residual_novelty
+    if method == "RedundancyOnly":
+        return -local_redundancy
+    if method == "Loss+Residual":
+        return clipped_loss + config.mu * residual_novelty
+    if method == "Loss-Redundancy":
+        return clipped_loss - config.global_redundancy_weight * local_redundancy
+    if method == "PU-C-style":
+        local_novelty = 1.0 - local_redundancy
+        return clipped_loss + config.mu * local_novelty - config.global_redundancy_weight * local_redundancy
+    if method == "Marginal+Residual":
+        return margin_score + config.mu * residual_novelty
+    if method == "Marginal-Redundancy":
+        return margin_score - config.global_redundancy_weight * local_redundancy
+    if method == "Marginal+Residual-Redundancy":
+        return margin_score + config.mu * residual_novelty - config.global_redundancy_weight * local_redundancy
+    raise ValueError(f"Unknown ablation method: {method}")
+
+
 def score_marginal(cand_stats: ModelStats) -> np.ndarray:
     return -cand_stats.margins
 

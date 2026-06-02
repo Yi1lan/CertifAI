@@ -248,6 +248,18 @@ def eval_error(
     return 1.0 - correct / max(total, 1)
 
 
+def eval_inappropriate_risk(
+    model: nn.Module,
+    x: np.ndarray,
+    y: np.ndarray,
+    gamma: float,
+    device: torch.device,
+    batch_size: int = 4096,
+) -> float:
+    losses = compute_losses(model, x, y, device, batch_size)
+    return float(np.mean(losses > gamma)) if len(losses) else 0.0
+
+
 def model_stats(
     model: nn.Module,
     x: np.ndarray,

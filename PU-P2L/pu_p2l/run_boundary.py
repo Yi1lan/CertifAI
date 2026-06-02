@@ -8,7 +8,7 @@ from typing import Any
 import torch
 
 from .data import make_experiment_dataset, make_pretrain_split, pac_bayes_enabled_for_dataset
-from .io_utils import RESULT_FIELDS, summarize, write_csv, write_json
+from .io_utils import RESULT_FIELDS, SUMMARY_NUMERIC_FIELDS, summarize, write_csv, write_json
 from .model import resolve_device
 from .plotting import plot_boundary
 from .runner import DEFAULT_METHODS, METHODS, RunConfig, run_p2l_method
@@ -45,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cluster-std", type=float, default=0.45)
     parser.add_argument("--band-std", type=float, default=0.35)
     parser.add_argument("--duplicate-std", type=float, default=0.015)
+    add_dataset_args(parser)
 
     parser.add_argument("--model-name", type=str, default="auto", choices=["auto", "small_mlp", "mnist_fcn", "cifar_resnet18"])
     parser.add_argument("--hidden-dim", type=int, default=64)
@@ -105,6 +106,28 @@ def add_score_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--manifold-k", type=int, default=10)
     parser.add_argument("--manifold-tau", type=float, default=0.5)
     parser.add_argument("--manifold-eigenvectors", type=int, default=16)
+
+
+def add_dataset_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--mode-imbalance",
+        type=float,
+        default=0.85,
+        help="Mode-A probability for mode_mnist and boundary_duplicate_mnist.",
+    )
+    parser.add_argument(
+        "--boundary-augmentation",
+        type=int,
+        default=1,
+        help="Augmentation multiplier marker for boundary_duplicate_mnist; values >1 augment Mode A.",
+    )
+    parser.add_argument(
+        "--rotation-angles",
+        type=float,
+        nargs="+",
+        default=[-60.0, -30.0, 0.0, 30.0, 60.0],
+        help="Fixed rotation angles for rotated_mnist and rotated_fashion_mnist.",
+    )
 
 
 def build_config(args: argparse.Namespace) -> RunConfig:
@@ -173,6 +196,9 @@ def make_dataset_from_args(args: argparse.Namespace, seed: int, noise_rate: floa
         duplicate_std=args.duplicate_std,
         data_dir=args.data_dir,
         download=args.download_data,
+        mode_imbalance=getattr(args, "mode_imbalance", 0.85),
+        boundary_augmentation=getattr(args, "boundary_augmentation", 1),
+        rotation_angles=getattr(args, "rotation_angles", None),
     )
 
 
@@ -211,20 +237,7 @@ def main() -> None:
     summary = summarize(
         rows,
         group_fields=["dataset", "method", "noise_rate", "pretrain_fraction"],
-        numeric_fields=[
-            "compression_size",
-            "remaining_bad",
-            "effective_compression_size",
-            "certified_bound",
-            "test_error",
-            "pac_bayes_bound",
-            "pac_bayes_empirical_risk",
-            "pac_bayes_mc_upper",
-            "pac_bayes_kl",
-            "runtime_sec",
-            "stop_reached",
-            "train_calls",
-        ],
+        numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
     summary_fields: list[str] = []
     for row in summary:

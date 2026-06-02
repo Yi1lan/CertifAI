@@ -20,6 +20,20 @@ def canonical_dataset_name(dataset_name: str) -> str:
     name = dataset_name.strip().lower().replace("-", "_")
     if name in {"mnist", "binary_mnist", "binarymnist"}:
         return "mnist"
+    if name in {"mnist10", "mnist_10", "mnist_multiclass", "mnist10_class"}:
+        return "mnist10"
+    if name in {"fashion", "fashion_mnist", "fashionmnist", "fmnist"}:
+        return "fashion_mnist"
+    if name in {"rotated_mnist", "rotatedmnist"}:
+        return "rotated_mnist"
+    if name in {"rotated_fashion_mnist", "rotated_fashion", "rotated_fmnist"}:
+        return "rotated_fashion_mnist"
+    if name in {"mode_mnist", "mode_imbalanced_mnist", "mode_mnist_3459"}:
+        return "mode_mnist"
+    if name in {"boundary_duplicate_mnist", "boundary_aug_mnist", "duplicate_boundary_mnist"}:
+        return "boundary_duplicate_mnist"
+    if name in {"two_moons", "twomoons", "synthetic_two_moons"}:
+        return "two_moons"
     if name in {"cifar", "cifar10", "cifar_10", "cifar10_reduced"}:
         return "cifar10"
     if name in {"synthetic_redundancy_hard", "synthetic_redundacy_hard"}:
@@ -346,6 +360,300 @@ def make_mnist_dataset(
     )
 
 
+def make_mnist10_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+) -> DatasetBundle:
+    x_train_all, y_train_all, x_test_all, y_test_all = _load_mnist_arrays(data_dir, download)
+
+    train_count = min(int(n_train), len(y_train_all))
+    test_count = min(int(n_test), len(y_test_all))
+    train_idx = stratified_indices(y_train_all, train_count, stable_seed(seed, "mnist10-train"))
+    test_idx = stratified_indices(y_test_all, test_count, stable_seed(seed, "mnist10-test"))
+
+    x_train = ((x_train_all[train_idx] / 255.0 - 0.1307) / 0.3081)[:, None, :, :].astype(np.float32)
+    true_y_train = y_train_all[train_idx].astype(np.int64)
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 10, noise_rate, stable_seed(seed, "mnist10-label-noise", int(noise_rate * 10_000))
+    )
+    x_test = ((x_test_all[test_idx] / 255.0 - 0.1307) / 0.3081)[:, None, :, :].astype(np.float32)
+    y_test = y_test_all[test_idx].astype(np.int64)
+
+    return DatasetBundle(
+        x_train=x_train,
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=np.full(len(y_train), -1, dtype=np.int64),
+        is_duplicate_train=np.zeros(len(y_train), dtype=bool),
+        is_noisy_train=is_noisy_train,
+        x_test=x_test,
+        y_test=y_test,
+    )
+
+
+def _load_fashion_mnist_arrays(
+    data_dir: str,
+    download: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    datasets = _require_torchvision()
+    train = datasets.FashionMNIST(root=data_dir, train=True, download=download)
+    test = datasets.FashionMNIST(root=data_dir, train=False, download=download)
+    return (
+        train.data.numpy().astype(np.float32),
+        np.asarray(train.targets, dtype=np.int64),
+        test.data.numpy().astype(np.float32),
+        np.asarray(test.targets, dtype=np.int64),
+    )
+
+
+def normalize_gray_images(images: np.ndarray, mean: float, std: float) -> np.ndarray:
+    return ((images / 255.0 - mean) / std)[:, None, :, :].astype(np.float32)
+
+
+def make_fashion_mnist_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+) -> DatasetBundle:
+    x_train_all, y_train_all, x_test_all, y_test_all = _load_fashion_mnist_arrays(data_dir, download)
+
+    train_count = min(int(n_train), len(y_train_all))
+    test_count = min(int(n_test), len(y_test_all))
+    train_idx = stratified_indices(y_train_all, train_count, stable_seed(seed, "fashion-train"))
+    test_idx = stratified_indices(y_test_all, test_count, stable_seed(seed, "fashion-test"))
+
+    x_train = normalize_gray_images(x_train_all[train_idx], 0.2860, 0.3530)
+    true_y_train = y_train_all[train_idx].astype(np.int64)
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 10, noise_rate, stable_seed(seed, "fashion-label-noise", int(noise_rate * 10_000))
+    )
+    x_test = normalize_gray_images(x_test_all[test_idx], 0.2860, 0.3530)
+    y_test = y_test_all[test_idx].astype(np.int64)
+
+    return DatasetBundle(
+        x_train=x_train,
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=np.full(len(y_train), -1, dtype=np.int64),
+        is_duplicate_train=np.zeros(len(y_train), dtype=bool),
+        is_noisy_train=is_noisy_train,
+        x_test=x_test,
+        y_test=y_test,
+    )
+
+
+def rotate_images_uint8(images: np.ndarray, angles: np.ndarray) -> np.ndarray:
+    try:
+        from PIL import Image
+        from torchvision.transforms import InterpolationMode
+        from torchvision.transforms import functional as tvf
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise RuntimeError("Rotated image datasets require pillow and torchvision.") from exc
+
+    out = np.empty_like(images)
+    for idx, angle in enumerate(angles):
+        image = Image.fromarray(images[idx].astype(np.uint8), mode="L")
+        rotated = tvf.rotate(
+            image,
+            float(angle),
+            interpolation=InterpolationMode.BILINEAR,
+            fill=0,
+        )
+        out[idx] = np.asarray(rotated, dtype=np.uint8)
+    return out
+
+
+def fixed_rotation_angles(count: int, angles: list[float], seed: int) -> tuple[np.ndarray, np.ndarray]:
+    if not angles:
+        angles = [-60.0, -30.0, 0.0, 30.0, 60.0]
+    rng = np.random.default_rng(seed)
+    group_ids = np.arange(count, dtype=np.int64) % len(angles)
+    group_ids = rng.permutation(group_ids)
+    angle_arr = np.asarray([angles[int(group)] for group in group_ids], dtype=np.float32)
+    return angle_arr, group_ids.astype(np.int64)
+
+
+def make_rotated_gray_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+    fashion: bool,
+    rotation_angles: list[float],
+) -> DatasetBundle:
+    if fashion:
+        x_train_all, y_train_all, x_test_all, y_test_all = _load_fashion_mnist_arrays(data_dir, download)
+        mean, std = 0.2860, 0.3530
+        train_name, test_name, noise_name = "rotated-fashion-train", "rotated-fashion-test", "rotated-fashion-noise"
+    else:
+        x_train_all, y_train_all, x_test_all, y_test_all = _load_mnist_arrays(data_dir, download)
+        mean, std = 0.1307, 0.3081
+        train_name, test_name, noise_name = "rotated-mnist-train", "rotated-mnist-test", "rotated-mnist-noise"
+
+    train_count = min(int(n_train), len(y_train_all))
+    test_count = min(int(n_test), len(y_test_all))
+    train_idx = stratified_indices(y_train_all, train_count, stable_seed(seed, train_name))
+    test_idx = stratified_indices(y_test_all, test_count, stable_seed(seed, test_name))
+    train_angles, train_groups = fixed_rotation_angles(
+        len(train_idx), rotation_angles, stable_seed(seed, train_name + "-angles")
+    )
+    test_angles, _ = fixed_rotation_angles(
+        len(test_idx), rotation_angles, stable_seed(seed, test_name + "-angles")
+    )
+
+    x_train = normalize_gray_images(rotate_images_uint8(x_train_all[train_idx], train_angles), mean, std)
+    true_y_train = y_train_all[train_idx].astype(np.int64)
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 10, noise_rate, stable_seed(seed, noise_name, int(noise_rate * 10_000))
+    )
+    x_test = normalize_gray_images(rotate_images_uint8(x_test_all[test_idx], test_angles), mean, std)
+    y_test = y_test_all[test_idx].astype(np.int64)
+
+    return DatasetBundle(
+        x_train=x_train,
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=train_groups,
+        is_duplicate_train=np.zeros(len(y_train), dtype=bool),
+        is_noisy_train=is_noisy_train,
+        x_test=x_test,
+        y_test=y_test,
+    )
+
+
+def sample_mode_mnist_indices(
+    y_digits: np.ndarray,
+    count: int,
+    mode_imbalance: float,
+    seed: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    modes = {
+        0: (3, 5),
+        1: (4, 9),
+    }
+    mode_imbalance = float(np.clip(mode_imbalance, 0.0, 1.0))
+    mode_counts = {
+        0: int(round(count * mode_imbalance)),
+        1: count - int(round(count * mode_imbalance)),
+    }
+    chosen: list[int] = []
+    group_ids: list[int] = []
+    for mode, digits in modes.items():
+        per_digit = mode_counts[mode] // 2
+        extra = mode_counts[mode] % 2
+        for pos, digit in enumerate(digits):
+            digit_idx = np.where(y_digits == digit)[0]
+            take = min(len(digit_idx), per_digit + int(pos < extra))
+            if take:
+                selected = rng.choice(digit_idx, size=take, replace=False).tolist()
+                chosen.extend(selected)
+                group_ids.extend([mode] * len(selected))
+    order = rng.permutation(len(chosen))
+    return np.asarray(chosen, dtype=np.int64)[order], np.asarray(group_ids, dtype=np.int64)[order]
+
+
+def make_mode_mnist_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+    mode_imbalance: float,
+    boundary_augmentation: int = 1,
+) -> DatasetBundle:
+    x_train_all, y_train_digits, x_test_all, y_test_digits = _load_mnist_arrays(data_dir, download)
+    train_idx, group_id_train = sample_mode_mnist_indices(
+        y_train_digits, min(int(n_train), len(y_train_digits)), mode_imbalance, stable_seed(seed, "mode-mnist-train")
+    )
+    test_idx, _ = sample_mode_mnist_indices(
+        y_test_digits, min(int(n_test), len(y_test_digits)), 0.5, stable_seed(seed, "mode-mnist-test")
+    )
+    train_digits = y_train_digits[train_idx]
+    test_digits = y_test_digits[test_idx]
+    true_y_train = np.isin(train_digits, [5, 9]).astype(np.int64)
+    y_test = np.isin(test_digits, [5, 9]).astype(np.int64)
+    is_duplicate_train = np.zeros(len(train_idx), dtype=bool)
+
+    images = x_train_all[train_idx].copy()
+    boundary_augmentation = max(1, int(boundary_augmentation))
+    if boundary_augmentation > 1:
+        mode_a = group_id_train == 0
+        rng = np.random.default_rng(stable_seed(seed, "boundary-augmentation", boundary_augmentation))
+        mode_a_positions = np.flatnonzero(mode_a)
+        source_count = max(1, int(np.ceil(len(mode_a_positions) / boundary_augmentation)))
+        source_positions = rng.choice(mode_a_positions, size=source_count, replace=False)
+        repeated_sources = rng.choice(source_positions, size=len(mode_a_positions), replace=True)
+        angles = rng.uniform(-15.0, 15.0, size=len(mode_a_positions)).astype(np.float32)
+        images[mode_a_positions] = rotate_images_uint8(x_train_all[train_idx[repeated_sources]], angles)
+        is_duplicate_train[mode_a_positions] = True
+
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 2, noise_rate, stable_seed(seed, "mode-mnist-label-noise", int(noise_rate * 10_000))
+    )
+
+    return DatasetBundle(
+        x_train=normalize_gray_images(images, 0.1307, 0.3081),
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=group_id_train,
+        is_duplicate_train=is_duplicate_train,
+        is_noisy_train=is_noisy_train,
+        x_test=normalize_gray_images(x_test_all[test_idx], 0.1307, 0.3081),
+        y_test=y_test,
+    )
+
+
+def make_two_moons_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    cluster_std: float,
+) -> DatasetBundle:
+    def generate(count: int, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        half = count // 2
+        rest = count - half
+        theta0 = rng.uniform(0.0, np.pi, size=half)
+        theta1 = rng.uniform(0.0, np.pi, size=rest)
+        x0 = np.stack([np.cos(theta0), np.sin(theta0)], axis=1)
+        x1 = np.stack([1.0 - np.cos(theta1), 0.5 - np.sin(theta1)], axis=1)
+        x = np.vstack([x0, x1]).astype(np.float32)
+        y = np.concatenate([np.zeros(half, dtype=np.int64), np.ones(rest, dtype=np.int64)])
+        group = np.concatenate([(theta0 > np.pi / 2).astype(np.int64), 2 + (theta1 > np.pi / 2).astype(np.int64)])
+        x += rng.normal(0.0, cluster_std, size=x.shape).astype(np.float32)
+        perm = rng.permutation(count)
+        return x[perm], y[perm], group[perm].astype(np.int64)
+
+    rng = np.random.default_rng(seed)
+    x_train, true_y_train, group_id_train = generate(int(n_train), rng)
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train, 2, noise_rate, stable_seed(seed, "two-moons-label-noise", int(noise_rate * 10_000))
+    )
+    x_test, y_test, _ = generate(int(n_test), rng)
+
+    return DatasetBundle(
+        x_train=x_train,
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=group_id_train,
+        is_duplicate_train=np.zeros(len(y_train), dtype=bool),
+        is_noisy_train=is_noisy_train,
+        x_test=x_test,
+        y_test=y_test,
+    )
+
+
 def make_cifar10_dataset(
     seed: int,
     n_train: int,
@@ -406,6 +714,9 @@ def make_experiment_dataset(
     duplicate_std: float,
     data_dir: str,
     download: bool,
+    mode_imbalance: float = 0.85,
+    boundary_augmentation: int = 1,
+    rotation_angles: list[float] | None = None,
 ) -> DatasetBundle:
     name = canonical_dataset_name(dataset_name)
     if name == "synthetic_redundancy_hard":
@@ -423,9 +734,42 @@ def make_experiment_dataset(
         )
     if name == "mnist":
         return make_mnist_dataset(seed, n_train, n_test, noise_rate, data_dir, download)
+    if name == "mnist10":
+        return make_mnist10_dataset(seed, n_train, n_test, noise_rate, data_dir, download)
+    if name == "fashion_mnist":
+        return make_fashion_mnist_dataset(seed, n_train, n_test, noise_rate, data_dir, download)
+    if name == "rotated_mnist":
+        return make_rotated_gray_dataset(
+            seed, n_train, n_test, noise_rate, data_dir, download, False, rotation_angles or []
+        )
+    if name == "rotated_fashion_mnist":
+        return make_rotated_gray_dataset(
+            seed, n_train, n_test, noise_rate, data_dir, download, True, rotation_angles or []
+        )
+    if name == "mode_mnist":
+        return make_mode_mnist_dataset(
+            seed, n_train, n_test, noise_rate, data_dir, download, mode_imbalance, boundary_augmentation=1
+        )
+    if name == "boundary_duplicate_mnist":
+        return make_mode_mnist_dataset(
+            seed,
+            n_train,
+            n_test,
+            noise_rate,
+            data_dir,
+            download,
+            mode_imbalance,
+            boundary_augmentation=boundary_augmentation,
+        )
+    if name == "two_moons":
+        return make_two_moons_dataset(seed, n_train, n_test, noise_rate, cluster_std)
     if name == "cifar10":
         return make_cifar10_dataset(seed, n_train, n_test, noise_rate, data_dir, download)
-    raise ValueError(f"Unknown dataset '{dataset_name}'. Valid datasets: synthetic_redundancy_hard, mnist, cifar10.")
+    raise ValueError(
+        "Unknown dataset "
+        f"'{dataset_name}'. Valid datasets: synthetic_redundancy_hard, mnist, mnist10, fashion_mnist, "
+        "mode_mnist, boundary_duplicate_mnist, rotated_mnist, rotated_fashion_mnist, two_moons, cifar10."
+    )
 
 
 def make_pretrain_split(bundle: DatasetBundle, pretrain_fraction: float, seed: int) -> SplitBundle:

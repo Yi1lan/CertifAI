@@ -24,12 +24,37 @@ COLORS = {
     "PU-R-Vol": "#8ab07c",
     "PU-R-Manifold": "#e7c66b",
     "GREATS": "#e66d50",
+    "ClippedLoss": "#f3a361",
+    "ResidualOnly": "#7f8c8d",
+    "RedundancyOnly": "#9467bd",
+    "Loss+Residual": "#bcbd22",
+    "Loss-Redundancy": "#d62728",
+    "PU-C-style": "#ff9896",
+    "Marginal+Residual": "#17becf",
+    "Marginal-Redundancy": "#aec7e8",
+    "Marginal+Residual-Redundancy": "#ffbb78",
 }
-METHOD_ORDER = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
-CERTIFIED_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold"]
-BOUND_METHOD_ORDER = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
+METHOD_ORDER = [
+    "MaxLoss",
+    "Marginal",
+    "PU-R",
+    "PU-R-Vol",
+    "PU-R-Manifold",
+    "ClippedLoss",
+    "ResidualOnly",
+    "RedundancyOnly",
+    "Loss+Residual",
+    "Loss-Redundancy",
+    "PU-C-style",
+    "Marginal+Residual",
+    "Marginal-Redundancy",
+    "Marginal+Residual-Redundancy",
+    "GREATS",
+]
+CERTIFIED_METHOD_ORDER = [method for method in METHOD_ORDER if method != "GREATS"]
+BOUND_METHOD_ORDER = METHOD_ORDER
 GENERALIZATION_BOUND_CURVES = [
-    ("test_error", "risk", "-", 1.8, 0.16),
+    ("test_inappropriate_risk", "risk", "-", 1.8, 0.16),
     ("certified_bound", "P2L", "--", 1.7, 0.10),
     ("pac_bayes_bound", "PAC-Bayes", ":", 1.8, 0.08),
     ("self_selected_bound", "self-selected", "-.", 1.5, 0.08),
@@ -258,6 +283,24 @@ def plot_boundary(results_path: Path, plots_dir: Path) -> None:
             "Runtime vs Pretrain Fraction",
             plots_dir / f"runtime_vs_pretrain_noise_{suffix}.png",
         )
+        plot_metric(
+            rows,
+            methods,
+            noise_rate,
+            "test_inappropriate_risk",
+            "Test inappropriate risk",
+            "Test Inappropriate Risk vs Pretrain Fraction",
+            plots_dir / f"test_inappropriate_risk_vs_pretrain_noise_{suffix}.png",
+        )
+        plot_metric(
+            rows,
+            methods,
+            noise_rate,
+            "test_error",
+            "Test top-1 error",
+            "Test Top-1 Error vs Pretrain Fraction",
+            plots_dir / f"test_error_vs_pretrain_noise_{suffix}.png",
+        )
 
 
 def plot_generalization_bounds(results_path: Path, plots_dir: Path) -> None:
@@ -300,7 +343,7 @@ def plot_generalization_bound_and_risk(
                 alpha=alpha,
             )
     ax.set_xlabel("Pretrain fraction")
-    ax.set_ylabel("Clean test risk / generalization bound")
+    ax.set_ylabel("Test inappropriate risk / generalization bound")
     ax.set_title(f"MNIST Generalization Bounds vs Pretrain Fraction (noise={noise_rate:g})")
     ax.set_ylim(-0.02, 1.05)
     ax.grid(alpha=0.25)
@@ -319,7 +362,7 @@ def plot_certified_bound_and_risk(
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
-        xs, means, ses = grouped_curve(rows, method, noise_rate, "test_error")
+        xs, means, ses = grouped_curve(rows, method, noise_rate, "test_inappropriate_risk")
         if xs:
             plot_mean_band(
                 ax,
@@ -358,11 +401,15 @@ def plot_certified_bound_and_risk(
                 alpha=0.08,
             )
     ax.set_xlabel("Pretrain fraction")
-    ax.set_ylabel("Clean test risk / generalization bound" if show_pac_bayes else "Clean test risk / P2L bound")
-    title = (
-        "P2L/PAC-Bayes Bounds and Clean Test Risk"
+    ax.set_ylabel(
+        "Test inappropriate risk / generalization bound"
         if show_pac_bayes
-        else "P2L Bound and Clean Test Risk"
+        else "Test inappropriate risk / P2L bound"
+    )
+    title = (
+        "P2L/PAC-Bayes Bounds and Test Inappropriate Risk"
+        if show_pac_bayes
+        else "P2L Bound and Test Inappropriate Risk"
     )
     ax.set_title(f"{title} vs Pretrain Fraction (noise={noise_rate:g})")
     ax.grid(alpha=0.25)
@@ -426,7 +473,7 @@ def plot_es_budget_bound_and_risk_vs_pretrain(
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
-        xs, means, ses = grouped_budget_pretrain_curve(rows, method, noise_rate, es_budget, "test_error")
+        xs, means, ses = grouped_budget_pretrain_curve(rows, method, noise_rate, es_budget, "test_inappropriate_risk")
         if xs:
             plot_mean_band(
                 ax,
@@ -466,12 +513,14 @@ def plot_es_budget_bound_and_risk_vs_pretrain(
             )
     ax.set_xlabel("Pretrain fraction")
     ax.set_ylabel(
-        "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+        "Test inappropriate risk / ES generalization bound"
+        if show_pac_bayes
+        else "Test inappropriate risk / ES P2L bound"
     )
     title = (
-        "ES P2L/PAC-Bayes Bounds and Clean Test Risk"
+        "ES P2L/PAC-Bayes Bounds and Test Inappropriate Risk"
         if show_pac_bayes
-        else "ES P2L Bound and Clean Test Risk"
+        else "ES P2L Bound and Test Inappropriate Risk"
     )
     ax.set_title(
         f"{title} vs Pretrain Fraction (noise={noise_rate:g}, ES={es_budget})"
@@ -533,6 +582,49 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
                 plots_dir / f"remaining_bad_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
                 max_step=100,
             )
+            plot_step_metric(
+                rows,
+                methods,
+                noise_rate,
+                pretrain_fraction,
+                "effective_compression_size",
+                "ES effective compression size",
+                "ES Effective Compression Size vs Step",
+                plots_dir
+                / f"effective_compression_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+            )
+            plot_step_metric(
+                rows,
+                methods,
+                noise_rate,
+                pretrain_fraction,
+                "effective_compression_size",
+                "ES effective compression size",
+                "ES Effective Compression Size vs Step",
+                plots_dir
+                / f"effective_compression_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                max_step=100,
+            )
+            plot_step_metric(
+                rows,
+                methods,
+                noise_rate,
+                pretrain_fraction,
+                "spectral_entropy",
+                "Support spectral entropy",
+                "Support Spectral Entropy vs Step",
+                plots_dir / f"spectral_entropy_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+            )
+            plot_step_metric(
+                rows,
+                methods,
+                noise_rate,
+                pretrain_fraction,
+                "dynamic_mu",
+                "Dynamic novelty weight",
+                "Dynamic Novelty Weight vs Step",
+                plots_dir / f"dynamic_mu_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+            )
 
 
 def plot_step_bound_and_risk(
@@ -549,7 +641,7 @@ def plot_step_bound_and_risk(
     for method_index, method in enumerate(methods):
         if not boundary_only:
             xs, means, ses = grouped_step_curve(
-                rows, method, noise_rate, pretrain_fraction, "test_error", max_step=max_step
+                rows, method, noise_rate, pretrain_fraction, "test_inappropriate_risk", max_step=max_step
             )
             if xs:
                 plot_mean_band(
@@ -601,16 +693,18 @@ def plot_step_bound_and_risk(
         ax.set_ylabel("ES P2L bound")
     else:
         ax.set_ylabel(
-            "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+            "Test inappropriate risk / ES generalization bound"
+            if show_pac_bayes
+            else "Test inappropriate risk / ES P2L bound"
         )
     window_label = f", first {max_step:g} steps" if max_step is not None else ""
     if boundary_only:
         title = "ES P2L Bound"
     else:
         title = (
-            "ES P2L/PAC-Bayes Bounds and Clean Test Risk"
+            "ES P2L/PAC-Bayes Bounds and Test Inappropriate Risk"
             if show_pac_bayes
-            else "ES P2L Bound and Clean Test Risk"
+            else "ES P2L Bound and Test Inappropriate Risk"
         )
     ax.set_title(
         f"{title} vs Step{window_label} (noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
@@ -681,9 +775,9 @@ def plot_es_budget_noise(results_path: Path, plots_dir: Path) -> None:
                 methods,
                 budget,
                 pretrain_fraction,
-                "test_error",
-                "Clean test risk",
-                f"Clean Test Risk vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
+                "test_inappropriate_risk",
+                "Test inappropriate risk",
+                f"Test Inappropriate Risk vs Label-Noise Rate (ES={budget}, pretrain={pretrain_fraction:g})",
                 plots_dir / f"es_budget_test_risk_vs_noise_budget_{budget}_pretrain_{pretrain_suffix}.png",
             )
             plot_es_budget_bounds_vs_noise(
@@ -705,7 +799,7 @@ def plot_es_budget_bounds_vs_noise(
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
-        xs, means, ses = grouped_budget_noise_curve(rows, method, es_budget, pretrain_fraction, "test_error")
+        xs, means, ses = grouped_budget_noise_curve(rows, method, es_budget, pretrain_fraction, "test_inappropriate_risk")
         if xs:
             plot_mean_band(ax, xs, means, ses, method, label=f"{method} risk", linestyle="-", alpha=0.16)
 
@@ -718,9 +812,15 @@ def plot_es_budget_bounds_vs_noise(
             plot_mean_band(ax, xs, means, ses, method, label=f"{method} PAC-Bayes", linestyle=":", alpha=0.08)
     ax.set_xlabel("Label-noise rate")
     ax.set_ylabel(
-        "Clean test risk / ES generalization bound" if show_pac_bayes else "Clean test risk / ES P2L bound"
+        "Test inappropriate risk / ES generalization bound"
+        if show_pac_bayes
+        else "Test inappropriate risk / ES P2L bound"
     )
-    title = "ES P2L/PAC-Bayes Bounds" if show_pac_bayes else "ES P2L Bound and Clean Test Risk"
+    title = (
+        "ES P2L/PAC-Bayes Bounds and Test Inappropriate Risk"
+        if show_pac_bayes
+        else "ES P2L Bound and Test Inappropriate Risk"
+    )
     ax.set_title(f"{title} vs Label-Noise Rate (ES={es_budget}, pretrain={pretrain_fraction:g})")
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
@@ -771,6 +871,14 @@ def plot_noise(results_path: Path, plots_dir: Path) -> None:
     plot_noise_metric(
         rows,
         methods,
+        "test_inappropriate_risk",
+        "Test inappropriate risk",
+        "Test Inappropriate Risk vs Label-Noise Rate",
+        plots_dir / "test_inappropriate_risk_vs_noise.png",
+    )
+    plot_noise_metric(
+        rows,
+        methods,
         "compression_size",
         "Compression set size",
         "Compression Set Size vs Label-Noise Rate",
@@ -788,7 +896,7 @@ def plot_noise_bounds_vs_noise(
     fig, ax = plt.subplots(figsize=(9, 5.2))
     show_pac_bayes = should_plot_pac_bayes(rows)
     for method in methods:
-        xs, means, ses = grouped_noise_curve(rows, method, "test_error")
+        xs, means, ses = grouped_noise_curve(rows, method, "test_inappropriate_risk")
         if xs:
             plot_mean_band(ax, xs, means, ses, method, label=f"{method} risk", linestyle="-", alpha=0.16)
 
@@ -800,11 +908,15 @@ def plot_noise_bounds_vs_noise(
         if show_pac_bayes and xs:
             plot_mean_band(ax, xs, means, ses, method, label=f"{method} PAC-Bayes", linestyle=":", alpha=0.08)
     ax.set_xlabel("Label-noise rate")
-    ax.set_ylabel("Clean test risk / generalization bound" if show_pac_bayes else "Clean test risk / P2L bound")
-    title = (
-        "P2L/PAC-Bayes Bounds and Clean Test Risk"
+    ax.set_ylabel(
+        "Test inappropriate risk / generalization bound"
         if show_pac_bayes
-        else "P2L Bound and Clean Test Risk"
+        else "Test inappropriate risk / P2L bound"
+    )
+    title = (
+        "P2L/PAC-Bayes Bounds and Test Inappropriate Risk"
+        if show_pac_bayes
+        else "P2L Bound and Test Inappropriate Risk"
     )
     ax.set_title(f"{title} vs Label-Noise Rate")
     ax.grid(alpha=0.25)
@@ -847,8 +959,11 @@ def plot_redundancy_diagnostics(
         ("noise_hit_rate", "Noise-hit rate"),
         ("duplicate_hit_rate", "Duplicate-hit rate"),
         ("pairwise_feature_cosine", "Pairwise feature cosine"),
+        ("strong_redundancy_hit_rate", "Strong redundancy-hit rate"),
+        ("mean_selected_residual_novelty", "Mean selected residual novelty"),
+        ("mode_entropy", "Mode/rotation entropy"),
     ]
-    fig, axes = plt.subplots(3, 1, figsize=(9, 10.5), sharex=True)
+    fig, axes = plt.subplots(len(metrics), 1, figsize=(9, 3.1 * len(metrics)), sharex=True)
     for ax, (metric, ylabel) in zip(axes, metrics):
         for method in methods:
             xs, means, ses = grouped_noise_curve(rows, method, metric)

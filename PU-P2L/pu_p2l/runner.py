@@ -14,22 +14,53 @@ from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from .bounds import gaussian_kl_isotropic, p2l_bound, pac_bayes_bound
 from .data import CertPool, SplitBundle, deterministic_initial_support, stable_seed, stratified_indices
-from .model import compute_losses, eval_error, make_model, model_stats, train_model
+from .model import compute_losses, eval_error, eval_inappropriate_risk, make_model, model_stats, train_model
 from .scores import (
     ScoreConfig,
     cosine_matrix,
+    normalized_spectral_entropy,
+    row_normed,
+    score_ablation,
     score_marginal,
     score_greats_reference,
     score_pu_r,
     score_pu_r_manifold,
     score_pu_r_vol,
+    support_span_basis,
     tie_break_argmax,
 )
 
 
-CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold"}
+ABLATION_METHODS = {
+    "ClippedLoss",
+    "ResidualOnly",
+    "RedundancyOnly",
+    "Loss+Residual",
+    "Loss-Redundancy",
+    "PU-C-style",
+    "Marginal+Residual",
+    "Marginal-Redundancy",
+    "Marginal+Residual-Redundancy",
+}
+CERTIFIED_METHODS = {"MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", *ABLATION_METHODS}
 REFERENCE_METHODS = {"GREATS"}
-METHODS = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
+METHODS = [
+    "MaxLoss",
+    "Marginal",
+    "PU-R",
+    "PU-R-Vol",
+    "PU-R-Manifold",
+    "ClippedLoss",
+    "ResidualOnly",
+    "RedundancyOnly",
+    "Loss+Residual",
+    "Loss-Redundancy",
+    "PU-C-style",
+    "Marginal+Residual",
+    "Marginal-Redundancy",
+    "Marginal+Residual-Redundancy",
+    "GREATS",
+]
 DEFAULT_METHODS = ["MaxLoss", "Marginal", "PU-R", "PU-R-Vol", "PU-R-Manifold", "GREATS"]
 
 
@@ -350,6 +381,9 @@ def run_p2l_method(
     effective_size = compression_size if stop_reached else compression_size + remaining_bad
     bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
     test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+    test_inappropriate_risk = eval_inappropriate_risk(
+        model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
+    )
     pac_stats = pac_bayes_stats(
         model,
         prior_vector,
@@ -358,7 +392,7 @@ def run_p2l_method(
         device,
         stable_seed(seed, f"{method}-pac-bayes-final", int(pretrain_fraction * 10_000)),
     )
-    diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
+    diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size, config.score)
     runtime_sec = time.perf_counter() - started
 
     return {
@@ -373,6 +407,7 @@ def run_p2l_method(
         "effective_compression_size": effective_size,
         "certified_bound": bound,
         "test_error": test_error,
+        "test_inappropriate_risk": test_inappropriate_risk,
         **pac_stats,
         "runtime_sec": runtime_sec,
         "stop_reached": int(stop_reached),
@@ -469,6 +504,9 @@ def run_p2l_trace(
             effective_size = len(support) if stop_reached else len(support) + remaining_bad
             bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
             test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+            test_inappropriate_risk = eval_inappropriate_risk(
+                model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
+            )
             pac_stats = pac_bayes_stats(
                 model,
                 prior_vector,
@@ -477,7 +515,9 @@ def run_p2l_trace(
                 device,
                 stable_seed(seed, f"{method}-pac-bayes-trace", step + int(pretrain_fraction * 10_000)),
             )
-            diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
+            diagnostics = selected_set_diagnostics(
+                model, split.pool, support, device, config.inference_batch_size, config.score
+            )
             rows.append(
                 {
                     "method": method,
@@ -492,6 +532,7 @@ def run_p2l_trace(
                     "effective_compression_size": effective_size,
                     "certified_bound": bound,
                     "test_error": test_error,
+                    "test_inappropriate_risk": test_inappropriate_risk,
                     **pac_stats,
                     "runtime_sec": time.perf_counter() - started,
                     "stop_reached": int(stop_reached),
@@ -574,6 +615,9 @@ def run_p2l_es_budgets(
         effective_size = len(support) if stop_reached else len(support) + remaining_bad
         bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
         test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+        test_inappropriate_risk = eval_inappropriate_risk(
+            model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
+        )
         pac_stats = pac_bayes_stats(
             model,
             prior_vector,
@@ -582,7 +626,7 @@ def run_p2l_es_budgets(
             device,
             stable_seed(seed, f"{method}-pac-bayes-budget", budget + int(pretrain_fraction * 10_000)),
         )
-        diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
+        diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size, config.score)
         rows.append(
             {
                 "method": method,
@@ -598,6 +642,7 @@ def run_p2l_es_budgets(
                 "effective_compression_size": effective_size,
                 "certified_bound": bound,
                 "test_error": test_error,
+                "test_inappropriate_risk": test_inappropriate_risk,
                 **pac_stats,
                 "runtime_sec": time.perf_counter() - started,
                 "stop_reached": int(stop_reached),
@@ -669,24 +714,89 @@ def selected_set_diagnostics(
     selected: list[int],
     device: torch.device,
     batch_size: int,
+    score_config: ScoreConfig,
 ) -> dict[str, float]:
     if not selected:
         return {
             "noise_hit_rate": 0.0,
             "duplicate_hit_rate": 0.0,
             "pairwise_feature_cosine": 0.0,
+            "mean_support_redundancy": 0.0,
+            "max_support_redundancy": 0.0,
+            "mean_selected_residual_novelty": 0.0,
+            "local_redundancy_hit_rate": 0.0,
+            "residual_redundancy_hit_rate": 0.0,
+            "strong_redundancy_hit_rate": 0.0,
+            "mode_entropy": 0.0,
+            "minority_mode_fraction": 0.0,
+            "spectral_entropy": 0.0,
+            "dynamic_mu": score_config.mu * (1.0 + max(float(score_config.alpha), 0.0)),
         }
     selected_arr = np.asarray(selected, dtype=np.int64)
     stats = model_stats(model, pool.x[selected_arr], pool.y[selected_arr], device, batch_size)
     if len(selected_arr) < 2:
         pairwise_feature_cosine = 0.0
+        mean_support_redundancy = 0.0
+        max_support_redundancy = 0.0
     else:
         sim = cosine_matrix(stats.embeddings, stats.embeddings)
-        pairwise_feature_cosine = float(np.mean(sim[np.triu_indices_from(sim, k=1)]))
+        upper = sim[np.triu_indices_from(sim, k=1)]
+        positive_upper = np.maximum(upper, 0.0)
+        pairwise_feature_cosine = float(np.mean(upper))
+        mean_support_redundancy = float(np.mean(positive_upper))
+        max_support_redundancy = float(np.max(positive_upper))
+
+    selected_unit = row_normed(stats.embeddings)
+    local_hits: list[float] = []
+    residual_hits: list[float] = []
+    strong_hits: list[float] = []
+    residual_values: list[float] = []
+    for pos in range(len(selected_arr)):
+        if pos == 0:
+            continue
+        prior = selected_unit[:pos]
+        current = selected_unit[pos : pos + 1]
+        local_redundancy = float(np.max(np.maximum(current @ prior.T, 0.0)))
+        basis = support_span_basis(stats.embeddings[:pos], score_config.residual_rank, score_config.residual_tol)
+        if basis.shape[1] == 0:
+            residual_novelty = 1.0
+        else:
+            projection_sq = float(np.sum((current @ basis) ** 2))
+            residual_novelty = float(np.clip(1.0 - projection_sq, 0.0, 1.0))
+        residual_values.append(residual_novelty)
+        local_hit = float(local_redundancy >= 0.90)
+        residual_hit = float(residual_novelty <= 0.10)
+        local_hits.append(local_hit)
+        residual_hits.append(residual_hit)
+        strong_hits.append(float(local_hit and residual_hit))
+
+    group_ids = pool.group_id[selected_arr]
+    valid_groups = group_ids[group_ids >= 0]
+    if len(valid_groups):
+        _, counts = np.unique(valid_groups, return_counts=True)
+        probs = counts.astype(np.float64) / np.sum(counts)
+        mode_entropy = float(-np.sum(probs * np.log(np.maximum(probs, 1e-12))) / max(np.log(len(probs)), 1e-12))
+        minority_mode_fraction = float(np.min(probs))
+    else:
+        mode_entropy = 0.0
+        minority_mode_fraction = 0.0
+
+    spectral_entropy = normalized_spectral_entropy(stats.embeddings, score_config.residual_tol)
+    dynamic_mu = score_config.mu * (1.0 + max(float(score_config.alpha), 0.0) * (1.0 - spectral_entropy))
     return {
         "noise_hit_rate": float(np.mean(pool.is_noisy[selected_arr])),
         "duplicate_hit_rate": float(np.mean(pool.is_duplicate[selected_arr])),
         "pairwise_feature_cosine": pairwise_feature_cosine,
+        "mean_support_redundancy": mean_support_redundancy,
+        "max_support_redundancy": max_support_redundancy,
+        "mean_selected_residual_novelty": float(np.mean(residual_values)) if residual_values else 0.0,
+        "local_redundancy_hit_rate": float(np.mean(local_hits)) if local_hits else 0.0,
+        "residual_redundancy_hit_rate": float(np.mean(residual_hits)) if residual_hits else 0.0,
+        "strong_redundancy_hit_rate": float(np.mean(strong_hits)) if strong_hits else 0.0,
+        "mode_entropy": mode_entropy,
+        "minority_mode_fraction": minority_mode_fraction,
+        "spectral_entropy": spectral_entropy,
+        "dynamic_mu": dynamic_mu,
     }
 
 
@@ -722,6 +832,8 @@ def choose_next(
         scores = score_pu_r_vol(candidate_losses, support_stats, cand_stats, config.score)
     elif method == "PU-R-Manifold":
         scores = score_pu_r_manifold(candidate_losses, support_stats, cand_stats, config.score)
+    elif method in ABLATION_METHODS:
+        scores = score_ablation(method, candidate_losses, support_stats, cand_stats, config.score)
     elif method == "GREATS":
         probe_stats = model_stats(model, probe_x, probe_y, device, config.inference_batch_size)
         scores = score_greats_reference(cand_stats, probe_stats, support_stats, config.score.lambda_redundancy)

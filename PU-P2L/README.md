@@ -1,25 +1,26 @@
-# PU-P2L Clean Experiments
+# PU-P2L Thesis Experiments
 
-This folder is the cleaned implementation for the PU-P2L experiments. The older
-`certifai_experiments/` folder is kept as a lab/reference area.
+This folder is the cleaned implementation for the PU-P2L thesis experiments.
+The older `certifai_experiments/` folder is kept as a lab/reference area.
 
-Implemented methods:
+The authoritative runbook for the thesis package is
+[`thesis_experiment_commands.md`](thesis_experiment_commands.md). It contains
+all experiment commands under the hierarchy:
 
-- `MaxLoss`: standard P2L max-loss selector.
-- `Marginal`: smallest softmax top-2 margin selector.
-- `PU-R`: residual-novelty selector using the support-span residual.
-- `PU-R-Vol`: PU-R with a deterministic spectral-entropy volume boost.
-- `PU-R-Manifold`: PU-R with deterministic support-graph geodesic redundancy.
-- `GREATS`: non-certified GREATS-style probe-gradient reference selector.
+```text
+results/thesis_v2/
+  with_marginal/
+  without_marginal/
+```
 
-All P2L/PU methods run without an early-stopping budget. A large
-`--max-total-support` cap is still available as a safety guard. If the cap is
-hit before Stop, the output records `stop_reached=0` and uses
-`effective_compression_size = |T| + remaining_bad` as a diagnostic.
+Every thesis experiment should be run in both versions. The `with_marginal`
+branch includes `Marginal` and marginal-derived ablations; the
+`without_marginal` branch excludes them so the thesis can present a published
+core comparison if Marginal is not used explicitly.
 
 ## Conda Setup
 
-Run the setup commands from the repository root, not from inside `PU-P2L/`.
+Run setup from the repository root, not from inside `PU-P2L/`.
 
 ```bash
 cd /Users/yi1lan/Desktop/CertifAI
@@ -27,7 +28,7 @@ conda env create -f environment.yml
 conda activate certifai-experiments
 ```
 
-If the environment already exists, update it instead:
+If the environment already exists:
 
 ```bash
 cd /Users/yi1lan/Desktop/CertifAI
@@ -35,316 +36,168 @@ conda env update -f environment.yml --prune
 conda activate certifai-experiments
 ```
 
-On an NVIDIA A40 server, install the CUDA-enabled PyTorch build for that server
-before running `--device cuda` if the default Conda solve gives a CPU build.
-
-Check that the core packages are visible:
+On an A40 server, check that PyTorch sees CUDA before running GPU experiments:
 
 ```bash
-python -c "import torch, numpy, matplotlib; print(torch.__version__)"
+python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-All experiment commands below assume this Conda environment is active and use
-`PYTHONPATH=PU-P2L` so Python can import the clean `pu_p2l` package.
-
-The current dataset is recorded as `synthetic_redundancy_hard` in each CSV row,
-and the recommended output directories below are namespaced under
-`results/synthetic_redundancy_hard/`. Use a different `--dataset-name` and
-output subdirectory when adding new datasets.
-
-PAC-Bayes is disabled for `synthetic_redundancy_hard`. The current synthetic
-experiments plot clean test risk and P2L compression certificates only. A
-separate PAC-Bayes implementation can be enabled later for MNIST/CIFAR-style
-datasets where the stochastic-posterior baseline is meaningful.
-
-MNIST/CIFAR experiments are enabled through the same five entry points by
-setting `--dataset-name mnist` or `--dataset-name cifar10`. They require
-`torchvision`; `environment.yml` includes it. For image datasets, PAC-Bayes is
-computed with a trained Gaussian posterior over the classifier head by default
-(`--pac-bayes-scope head`) using the pretraining checkpoint as the prior.
-
-## MNIST Generalization-Bound Comparison
-
-This runs the binary MNIST setup and compares clean test risk against four
-bound curves: the P2L compression certificate, PAC-Bayes, the anytime
-self-selected-data bound of Rodemann and Bailie, and the clipped-Gaussian
-adaptive-data-analysis bound of Marchant and Rubinstein. The external-paper
-bounds are recorded with their component constants because they require
-problem-specific Lipschitz, dimension, diameter, query-count, and privacy
-calibration choices.
+All commands assume:
 
 ```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.run_generalization_bounds \
-  --output-dir results/genearlization_bound/mnist \
-  --dataset-name mnist \
-  --download-data \
-  --device cpu \
-  --seeds 0 1 2 3 4 \
-  --noise-rates 0.0 0.4 \
-  --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
-  --methods PU-R-Vol \
-  --n-train 3000 \
-  --n-test 10000 \
-  --pac-bayes-samples 50
+export PYTHONPATH=PU-P2L
 ```
 
-Outputs:
+## Implemented Methods
 
-- `results.csv`: one row per seed, noise, pretrain fraction, and method.
-- `summary.csv`: grouped means and standard errors.
-- `plots/generalization_bounds_vs_pretrain_noise_0.png`
-- `plots/generalization_bounds_vs_pretrain_noise_0p4.png`
+Certified selectors, using the P2L/P2L-ES certificate:
 
-The default self-selected-data instantiation uses the MNIST input-space
-diameter and `d = 785` (784 pixels plus the binary label coordinate), so it is
-expected to be conservative. Override `--ssd-dimension`,
-`--ssd-data-diameter`, or `--ssd-loss-lipschitz` only when those constants are
-part of the comparison protocol.
+- `MaxLoss`: original P2L max-loss selector.
+- `Marginal`: smallest softmax top-2 margin selector.
+- `PU-R`: clipped loss plus residual novelty minus local redundancy.
+- `PU-R-Vol`: PU-R with deterministic spectral-entropy volume adaptation.
+- `PU-R-Manifold`: PU-R with deterministic support-graph manifold adaptation.
 
-## Boundary Experiment
+Non-certified reference:
 
-This runs the hard synthetic setting at `noise=0.0` and `noise=0.4`, plotting
-effective compression size, runtime, P2L bounds, and clean test risk
-versus pretrain fraction.
+- `GREATS`: GREATS-style probe-gradient selector. It is recorded as a practical
+  reference; it is not treated as having a P2L compression certificate.
+
+Ablation selectors:
+
+- `ClippedLoss`
+- `ResidualOnly`
+- `RedundancyOnly`
+- `Loss+Residual`
+- `Loss-Redundancy`
+- `PU-C-style`
+- `Marginal+Residual`
+- `Marginal-Redundancy`
+- `Marginal+Residual-Redundancy`
+
+## Supported Datasets
+
+Use `--dataset-name` with one of:
+
+- `synthetic_redundancy_hard`
+- `mnist`: binary MNIST, digits `0` to `4` vs `5` to `9`
+- `mnist10`: ten-class MNIST
+- `fashion_mnist`: ten-class Fashion-MNIST
+- `mode_mnist`: binary `{3,4}` vs `{5,9}` with controllable mode imbalance
+- `boundary_duplicate_mnist`: `mode_mnist` plus redundant boundary-like samples
+- `rotated_mnist`: deterministic fixed-angle rotated MNIST
+- `rotated_fashion_mnist`: deterministic fixed-angle rotated Fashion-MNIST
+- `two_moons`: synthetic two-moons manifold diagnostic
+- `cifar10`: reduced CIFAR-10 subset
+
+Dataset-specific knobs:
+
+- `--mode-imbalance`: Mode-A probability for `mode_mnist` and
+  `boundary_duplicate_mnist`.
+- `--boundary-augmentation`: redundant boundary augmentation multiplier for
+  `boundary_duplicate_mnist`.
+- `--rotation-angles`: fixed rotation domains for rotated datasets.
+
+## Experiment Entry Points
+
+- `python -m pu_p2l.run_boundary`: risk, P2L/PAC-Bayes bound, compression size,
+  and runtime vs pretrain fraction.
+- `python -m pu_p2l.run_noise`: risk, compression size, bounds, and selection
+  diagnostics vs label-noise rate.
+- `python -m pu_p2l.run_es_trace`: P2L-ES trajectories vs selection step.
+- `python -m pu_p2l.run_es_budget_boundary`: fixed-ES-budget bounds/risk vs
+  pretrain fraction.
+- `python -m pu_p2l.run_es_budget_noise`: fixed-ES-budget bounds/risk vs noise.
+- `python -m pu_p2l.run_generalization_bounds`: P2L, PAC-Bayes, and external
+  generalization-bound comparison.
+- `python -m pu_p2l.replot`: regenerate plots from existing `results.csv`.
+
+## Recorded Metrics
+
+The CSV outputs record both empirical and certificate-relevant quantities:
+
+- `compression_size`
+- `remaining_bad`
+- `effective_compression_size`
+- `certified_bound`
+- `test_inappropriate_risk`
+- `test_error`
+- `runtime_sec`
+- `train_calls`
+- `noise_hit_rate`
+- `duplicate_hit_rate`
+- `pairwise_feature_cosine`
+- `mean_support_redundancy`
+- `max_support_redundancy`
+- `mean_selected_residual_novelty`
+- `local_redundancy_hit_rate`
+- `residual_redundancy_hit_rate`
+- `strong_redundancy_hit_rate`
+- `mode_entropy`
+- `minority_mode_fraction`
+- `spectral_entropy`
+- `dynamic_mu`
+
+`test_inappropriate_risk` is the main empirical counterpart of the P2L
+certificate. `test_error` is still recorded for standard ML interpretation.
+
+## PAC-Bayes
+
+PAC-Bayes is enabled for image-style datasets when `--pac-bayes-samples > 0`.
+The default thesis commands use a Gaussian posterior over the classifier head:
 
 ```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.run_boundary \
-  --output-dir results/synthetic_redundancy_hard/boundary \
-  --dataset-name synthetic_redundancy_hard \
-  --device cpu \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --noise-rates 0.0 0.4 \
-  --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
-  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
-  --n-train 3000 \
-  --n-test 10000 \
-  --duplicate-groups 40 \
-  --duplicates-per-group 10 \
-  --ambiguous-fraction 0.35 \
-  --duplicate-std 0.015 \
-  --initial-per-class 2 \
-  --p2l-epochs-per-iter 1 \
-  --max-total-support 600 \
-  --lambda-redundancy 1.0 \
-  --global-redundancy-weight 1.5 \
-  --residual-rank 0 \
-  --manifold-k 10 \
-  --manifold-tau 0.5 \
-  --manifold-eigenvectors 16
+--pac-bayes-samples 50 --pac-bayes-train-epochs 1 --pac-bayes-scope head
 ```
 
-Outputs:
+PAC-Bayes is intentionally disabled for `synthetic_redundancy_hard`, where the
+current stochastic-posterior baseline was not meaningful.
 
-- `results.csv`: one row per seed, noise, pretrain fraction, and method.
-- `summary.csv`: grouped means and standard errors.
-- `plots/certified_bound_and_risk_vs_pretrain_noise_0.png`
-- `plots/certified_bound_and_risk_vs_pretrain_noise_0p4.png`
-- `plots/effective_compression_vs_pretrain_noise_0.png`
-- `plots/effective_compression_vs_pretrain_noise_0p4.png`
-- `plots/runtime_vs_pretrain_noise_0.png`
-- `plots/runtime_vs_pretrain_noise_0p4.png`
+## Plotting
 
-## Noise Robustness Experiment
+All plots use connected standard-error bands rather than independent error bars.
+For ES traces, the full-step plot shows the ES P2L bound only to avoid clutter;
+the first-100-step plot includes risk and bound. The trace runner also plots:
 
-This runs the same hard synthetic setting while sweeping label-noise rate. All
-methods run without early stopping.
+- `remaining_bad` vs step
+- `effective_compression_size` vs step
+- `spectral_entropy` vs step
+- `dynamic_mu` vs step
 
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.run_noise \
-  --output-dir results/synthetic_redundancy_hard/noise \
-  --dataset-name synthetic_redundancy_hard \
-  --device cpu \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --noise-rates 0.0 0.1 0.2 0.3 0.4 \
-  --pretrain-fraction 0.0 \
-  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
-  --n-train 3000 \
-  --n-test 10000 \
-  --duplicate-groups 40 \
-  --duplicates-per-group 10 \
-  --ambiguous-fraction 0.35 \
-  --duplicate-std 0.015 \
-  --initial-per-class 2 \
-  --p2l-epochs-per-iter 1 \
-  --max-total-support 800 \
-  --lambda-redundancy 1.0 \
-  --global-redundancy-weight 1.5 \
-  --residual-rank 0 \
-  --manifold-k 10 \
-  --manifold-tau 0.5 \
-  --manifold-eigenvectors 16
-```
-
-Outputs:
-
-- `plots/test_error_vs_noise.png`
-- `plots/compression_size_vs_noise.png`
-- `plots/bounds_vs_noise.png`
-- `plots/redundancy_diagnostics_vs_noise.png`
-
-The redundancy plot contains noise-hit rate, duplicate-hit rate, and pairwise
-feature cosine.
-
-## Early-Stop Trace Experiment
-
-This runs the hard synthetic setting and records the clean test risk and ES
-certificate during the selection process. At each recorded step, the certificate
-uses `|T_step| + remaining_bad_step` until Stop is reached, so intermediate
-points can be interpreted as early-stopped P2L certificates. The comparison is
-shown for `MaxLoss`, `Marginal`, `PU-R`, `PU-R-Vol`, `PU-R-Manifold`, and `GREATS`; `GREATS` appears
-as clean test risk only because it has no P2L compression certificate.
-
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.run_es_trace \
-  --output-dir results/synthetic_redundancy_hard/es_trace \
-  --dataset-name synthetic_redundancy_hard \
-  --device cpu \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --noise-rates 0.0 0.4 \
-  --pretrain-fractions 0.0 \
-  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
-  --record-every 5 \
-  --n-train 3000 \
-  --n-test 10000 \
-  --duplicate-groups 40 \
-  --duplicates-per-group 10 \
-  --ambiguous-fraction 0.35 \
-  --duplicate-std 0.015 \
-  --initial-per-class 2 \
-  --p2l-epochs-per-iter 1 \
-  --max-total-support 600 \
-  --lambda-redundancy 1.0 \
-  --global-redundancy-weight 1.5 \
-  --residual-rank 0 \
-  --manifold-k 10 \
-  --manifold-tau 0.5 \
-  --manifold-eigenvectors 16
-```
-
-Outputs:
-
-- `plots/es_bound_and_risk_vs_step_noise_0_pretrain_0.png`
-- `plots/es_bound_and_risk_vs_step_noise_0p4_pretrain_0.png`
-- `plots/es_bound_and_risk_vs_step_first_100_noise_0_pretrain_0.png`
-- `plots/es_bound_and_risk_vs_step_first_100_noise_0p4_pretrain_0.png`
-
-## Fixed-ES Budget Boundary Experiment
-
-This evaluates early-stopped certificates at fixed ES budgets. For each budget,
-the certificate uses `effective_compression_size = |T_ES| + remaining_bad_ES`.
-Risk is plotted as a solid line and the ES P2L certificate as a dashed line
-with the same method color.
-
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_boundary \
-  --output-dir results/synthetic_redundancy_hard/es_budget_boundary \
-  --dataset-name synthetic_redundancy_hard \
-  --device cpu \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --noise-rates 0.0 0.4 \
-  --pretrain-fractions 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 \
-  --es-budgets 50 100 200 \
-  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
-  --n-train 3000 \
-  --n-test 10000 \
-  --duplicate-groups 40 \
-  --duplicates-per-group 10 \
-  --ambiguous-fraction 0.35 \
-  --duplicate-std 0.015 \
-  --initial-per-class 2 \
-  --p2l-epochs-per-iter 1 \
-  --max-total-support 600 \
-  --lambda-redundancy 1.0 \
-  --global-redundancy-weight 1.5 \
-  --residual-rank 0 \
-  --manifold-k 10 \
-  --manifold-tau 0.5 \
-  --manifold-eigenvectors 16
-```
-
-Outputs include:
-
-- `plots/es_budget_bound_and_risk_vs_pretrain_noise_0_budget_50.png`
-- `plots/es_budget_bound_and_risk_vs_pretrain_noise_0_budget_100.png`
-- `plots/es_budget_bound_and_risk_vs_pretrain_noise_0_budget_200.png`
-- `plots/es_budget_bound_and_risk_vs_pretrain_noise_0p4_budget_50.png`
-- `plots/es_budget_bound_and_risk_vs_pretrain_noise_0p4_budget_100.png`
-- `plots/es_budget_bound_and_risk_vs_pretrain_noise_0p4_budget_200.png`
-
-## Fixed-ES Budget Noise Experiment
-
-This sweeps label-noise rate at fixed ES budgets and plots ES effective
-compression size, clean test risk, and ES P2L bounds versus noise.
-
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.run_es_budget_noise \
-  --output-dir results/synthetic_redundancy_hard/es_budget_noise \
-  --dataset-name synthetic_redundancy_hard \
-  --device cpu \
-  --seeds 0 1 2 3 4 5 6 7 8 9 \
-  --noise-rates 0.0 0.1 0.2 0.3 0.4 \
-  --pretrain-fraction 0.0 \
-  --es-budgets 50 100 200 \
-  --methods MaxLoss Marginal PU-R PU-R-Vol PU-R-Manifold GREATS \
-  --n-train 3000 \
-  --n-test 10000 \
-  --duplicate-groups 40 \
-  --duplicates-per-group 10 \
-  --ambiguous-fraction 0.35 \
-  --duplicate-std 0.015 \
-  --initial-per-class 2 \
-  --p2l-epochs-per-iter 1 \
-  --max-total-support 600 \
-  --lambda-redundancy 1.0 \
-  --global-redundancy-weight 1.5 \
-  --residual-rank 0 \
-  --manifold-k 10 \
-  --manifold-tau 0.5 \
-  --manifold-eigenvectors 16
-```
-
-Outputs include:
-
-- `plots/es_budget_effective_compression_vs_noise_budget_50_pretrain_0.png`
-- `plots/es_budget_effective_compression_vs_noise_budget_100_pretrain_0.png`
-- `plots/es_budget_effective_compression_vs_noise_budget_200_pretrain_0.png`
-- `plots/es_budget_test_risk_vs_noise_budget_50_pretrain_0.png`
-- `plots/es_budget_test_risk_vs_noise_budget_100_pretrain_0.png`
-- `plots/es_budget_test_risk_vs_noise_budget_200_pretrain_0.png`
-- `plots/es_budget_bounds_vs_noise_budget_50_pretrain_0.png`
-- `plots/es_budget_bounds_vs_noise_budget_100_pretrain_0.png`
-- `plots/es_budget_bounds_vs_noise_budget_200_pretrain_0.png`
-
-## Regenerate Plots
-
-Use this after changing plot style without rerunning experiments:
+To regenerate plots after changing style:
 
 ```bash
 PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/synthetic_redundancy_hard/boundary \
+  --results-dir results/thesis_v2/with_marginal/binary_mnist/core_boundary \
   --kind boundary
 ```
 
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/synthetic_redundancy_hard/noise \
-  --kind noise
+Valid `--kind` values are `boundary`, `noise`, `es_trace`,
+`es_budget_boundary`, `es_budget_noise`, and `generalization_bounds`.
+
+## Thesis Runbook
+
+Run commands one by one from:
+
+```text
+PU-P2L/thesis_experiment_commands.md
 ```
 
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/synthetic_redundancy_hard/es_trace \
-  --kind es_trace
-```
+The command file follows the refined thesis plan:
 
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/synthetic_redundancy_hard/es_budget_boundary \
-  --kind es_budget_boundary
-```
+1. Binary MNIST core certificate comparison.
+2. Literature/generalization-bound comparison.
+3. Mode-imbalanced MNIST for PU-R vs Marginal mechanism.
+4. Boundary-duplicate augmentation.
+5. PU-R ablations.
+6. PU-R hyperparameter sensitivity.
+7. Noisy binary MNIST.
+8. MNIST 10-class.
+9. Fashion-MNIST and PU-R-Vol.
+10. Rotated-MNIST and PU-R-Manifold.
+11. Two-moons manifold diagnostic.
+12. Optional CIFAR-10 reduced.
+13. Optional rotated Fashion-MNIST.
 
-```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/synthetic_redundancy_hard/es_budget_noise \
-  --kind es_budget_noise
-```
+The raw CSV and `summary.csv` files contain the runtime and compression fields
+needed for thesis tables.

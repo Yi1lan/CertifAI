@@ -12,10 +12,10 @@ import torch
 from .bounds import p2l_bound
 from .data import deterministic_initial_support, make_pretrain_split, stable_seed
 from .io_utils import summarize, write_csv, write_json
-from .model import compute_losses, eval_error, resolve_device, train_model
+from .model import compute_losses, eval_error, eval_inappropriate_risk, resolve_device, train_model
 from .adaptive_generalization_bounds import ada_clipped_gaussian_bound, self_selected_generalization_bound
 from .plotting import plot_generalization_bounds
-from .run_boundary import add_pac_bayes_args, add_score_args, build_config, make_dataset_from_args
+from .run_boundary import add_dataset_args, add_pac_bayes_args, add_score_args, build_config, make_dataset_from_args
 from .runner import (
     CERTIFIED_METHODS,
     METHODS,
@@ -49,6 +49,7 @@ GENERALIZATION_FIELDS = [
     "selection_steps",
     "certified_bound",
     "test_error",
+    "test_inappropriate_risk",
     "pool_empirical_error",
     "support_empirical_error",
     "pac_bayes_bound",
@@ -86,6 +87,16 @@ GENERALIZATION_FIELDS = [
     "noise_hit_rate",
     "duplicate_hit_rate",
     "pairwise_feature_cosine",
+    "mean_support_redundancy",
+    "max_support_redundancy",
+    "mean_selected_residual_novelty",
+    "local_redundancy_hit_rate",
+    "residual_redundancy_hit_rate",
+    "strong_redundancy_hit_rate",
+    "mode_entropy",
+    "minority_mode_fraction",
+    "spectral_entropy",
+    "dynamic_mu",
 ]
 
 
@@ -116,6 +127,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cluster-std", type=float, default=0.45)
     parser.add_argument("--band-std", type=float, default=0.35)
     parser.add_argument("--duplicate-std", type=float, default=0.015)
+    add_dataset_args(parser)
 
     parser.add_argument("--model-name", type=str, default="auto", choices=["auto", "small_mlp", "mnist_fcn", "cifar_resnet18"])
     parser.add_argument("--hidden-dim", type=int, default=64)
@@ -411,6 +423,9 @@ def run_generalization_method(
     effective_size = compression_size if stop_reached else compression_size + remaining_bad
     certified_bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
     test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+    test_inappropriate_risk = eval_inappropriate_risk(
+        model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
+    )
     pac_stats = pac_bayes_stats(
         model,
         prior_vector,
@@ -430,7 +445,7 @@ def run_generalization_method(
         device,
         config,
     )
-    diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size)
+    diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size, config.score)
     runtime_sec = time.perf_counter() - started
 
     return {
@@ -445,6 +460,7 @@ def run_generalization_method(
         "effective_compression_size": effective_size,
         "certified_bound": certified_bound,
         "test_error": test_error,
+        "test_inappropriate_risk": test_inappropriate_risk,
         **pac_stats,
         **adaptive_stats,
         "runtime_sec": runtime_sec,
@@ -460,9 +476,6 @@ def main() -> None:
     unknown = sorted(set(args.methods) - set(METHODS))
     if unknown:
         raise ValueError(f"Unknown methods: {unknown}. Valid methods: {METHODS}")
-    if args.dataset_name.strip().lower() not in {"mnist", "binary_mnist", "binarymnist"}:
-        raise ValueError("This experiment is intended for MNIST. Use --dataset-name mnist.")
-
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     device = resolve_device(args.device)
