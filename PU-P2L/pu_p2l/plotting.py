@@ -220,6 +220,21 @@ def grouped_step_curve(
     return xs, means, ses
 
 
+def has_step_metric(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    noise_rate: float,
+    pretrain_fraction: float,
+    metric: str,
+    max_step: float | None = None,
+) -> bool:
+    for method in methods:
+        xs, _, _ = grouped_step_curve(rows, method, noise_rate, pretrain_fraction, metric, max_step=max_step)
+        if xs:
+            return True
+    return False
+
+
 def grouped_budget_pretrain_curve(
     rows: list[dict[str, str]],
     method: str,
@@ -679,15 +694,23 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
                     max_step=100,
                     boundary_only=True,
                 )
-                plot_step_bound_and_risk(
+                if has_step_metric(
                     rows,
                     view_methods,
                     noise_rate,
                     pretrain_fraction,
-                    view_dir
-                    / f"es_bound_and_risk_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    "test_inappropriate_risk",
                     max_step=100,
-                )
+                ):
+                    plot_step_bound_and_risk(
+                        rows,
+                        view_methods,
+                        noise_rate,
+                        pretrain_fraction,
+                        view_dir
+                        / f"es_bound_and_risk_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                        max_step=100,
+                    )
                 plot_step_metric(
                     rows,
                     view_methods,
@@ -732,26 +755,28 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
                     / f"effective_compression_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
                     max_step=100,
                 )
-                plot_step_metric(
-                    rows,
-                    view_methods,
-                    noise_rate,
-                    pretrain_fraction,
-                    "spectral_entropy",
-                    "Support spectral entropy",
-                    "Support Spectral Entropy vs Step",
-                    view_dir / f"spectral_entropy_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-                )
-                plot_step_metric(
-                    rows,
-                    view_methods,
-                    noise_rate,
-                    pretrain_fraction,
-                    "dynamic_mu",
-                    "Dynamic novelty weight",
-                    "Dynamic Novelty Weight vs Step",
-                    view_dir / f"dynamic_mu_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
-                )
+                if has_step_metric(rows, view_methods, noise_rate, pretrain_fraction, "spectral_entropy"):
+                    plot_step_metric(
+                        rows,
+                        view_methods,
+                        noise_rate,
+                        pretrain_fraction,
+                        "spectral_entropy",
+                        "Support spectral entropy",
+                        "Support Spectral Entropy vs Step",
+                        view_dir / f"spectral_entropy_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    )
+                if has_step_metric(rows, view_methods, noise_rate, pretrain_fraction, "dynamic_mu"):
+                    plot_step_metric(
+                        rows,
+                        view_methods,
+                        noise_rate,
+                        pretrain_fraction,
+                        "dynamic_mu",
+                        "Dynamic novelty weight",
+                        "Dynamic Novelty Weight vs Step",
+                        view_dir / f"dynamic_mu_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    )
 
 
 def plot_step_bound_and_risk(
@@ -837,7 +862,9 @@ def plot_step_bound_and_risk(
         f"{title} vs Step{window_label} (noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
     )
     ax.grid(alpha=0.25)
-    ax.legend(fontsize=8, ncol=2)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, fontsize=8, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)
@@ -871,7 +898,9 @@ def plot_step_metric(
         f"{title}{window_label} (noise={noise_rate:g}, pretrain={pretrain_fraction:g})"
     )
     ax.grid(alpha=0.25)
-    ax.legend(fontsize=9, ncol=2)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, fontsize=9, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)
