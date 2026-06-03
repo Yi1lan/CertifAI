@@ -169,7 +169,9 @@ python -m pu_p2l.run_es_budget_boundary \
 
 These experiments track the ES P2L generalization bound over the selection
 trajectory. The plot marks the minimum bound point and its corresponding
-iteration. We record every 2 selection steps.
+iteration. We record every 2 selection steps and train/update the traced model
+every 2 selected points, which gives the intended block trace for these
+boundary-only plots.
 
 Each command below produces two requested boundary-only plots:
 
@@ -195,6 +197,8 @@ python -m pu_p2l.run_es_trace \
   --pretrain-fractions $TRACE_PRETRAIN \
   --methods $TRACE_METHODS \
   --record-every 2 \
+  --train-every 2 \
+  --bound-only \
   --n-train $N_MNIST \
   --n-test $N_TEST \
   --max-total-support $SUPPORT_MNIST
@@ -215,6 +219,8 @@ python -m pu_p2l.run_es_trace \
   --pretrain-fractions $TRACE_PRETRAIN \
   --methods $TRACE_METHODS \
   --record-every 2 \
+  --train-every 2 \
+  --bound-only \
   --n-train $N_MNIST \
   --n-test $N_TEST \
   --max-total-support $SUPPORT_MNIST
@@ -236,6 +242,8 @@ python -m pu_p2l.run_es_trace \
   --pretrain-fractions $TRACE_PRETRAIN \
   --methods $TRACE_METHODS \
   --record-every 2 \
+  --train-every 2 \
+  --bound-only \
   --n-train $N_MNIST \
   --n-test $N_TEST \
   --max-total-support $SUPPORT_MNIST \

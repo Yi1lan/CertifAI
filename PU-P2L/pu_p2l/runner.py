@@ -4,7 +4,7 @@ import copy
 import random
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import torch
@@ -462,6 +462,9 @@ def run_p2l_trace(
     config: RunConfig,
     device: torch.device,
     record_every: int,
+    train_every: int = 1,
+    bound_only: bool = False,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> list[dict[str, Any]]:
     started = time.perf_counter()
     set_all_seeds(stable_seed(seed, method, int(pretrain_fraction * 10_000)))
@@ -500,9 +503,13 @@ def run_p2l_trace(
         probe_y = np.empty((0,), dtype=np.int64)
 
     record_every = max(1, int(record_every))
+    train_every = max(1, int(train_every))
 
     while True:
-        if support:
+        step = max(0, len(support) - initial_support_size)
+        should_train = bool(support) and (step == 0 or step % train_every == 0)
+        trained_this_step = False
+        if should_train:
             support_arr = np.asarray(support, dtype=np.int64)
             train_model(
                 model,
@@ -518,8 +525,8 @@ def run_p2l_trace(
                 nesterov=config.nesterov,
             )
             train_calls += 1
+            trained_this_step = True
 
-        step = max(0, len(support) - initial_support_size)
         non_support = np.asarray([idx for idx in range(len(split.pool.y)) if idx not in support_set], dtype=np.int64)
         stop_reached = False
         remaining_bad = 0
@@ -535,27 +542,89 @@ def run_p2l_trace(
             bad_local = np.flatnonzero(losses > config.gamma)
             remaining_bad = int(len(bad_local))
             stop_reached = remaining_bad == 0
+            if stop_reached and not trained_this_step and support:
+                support_arr = np.asarray(support, dtype=np.int64)
+                train_model(
+                    model,
+                    split.pool.x[support_arr],
+                    split.pool.y[support_arr],
+                    epochs=config.p2l_epochs_per_iter,
+                    lr=config.p2l_lr,
+                    batch_size=config.batch_size,
+                    device=device,
+                    weight_decay=config.weight_decay,
+                    optimizer_name=config.optimizer,
+                    momentum=config.momentum,
+                    nesterov=config.nesterov,
+                )
+                train_calls += 1
+                trained_this_step = True
+                losses = compute_losses(
+                    model,
+                    split.pool.x[non_support],
+                    split.pool.y[non_support],
+                    device,
+                    config.inference_batch_size,
+                )
+                bad_local = np.flatnonzero(losses > config.gamma)
+                remaining_bad = int(len(bad_local))
+                stop_reached = remaining_bad == 0
 
         hit_limit = (not stop_reached) and len(support) >= limit
         should_record = step == 0 or step % record_every == 0 or stop_reached or hit_limit
         if should_record:
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "method": method,
+                        "seed": seed,
+                        "step": step,
+                        "bad": remaining_bad,
+                        "support": len(support),
+                    }
+                )
             effective_size = len(support) if stop_reached else len(support) + remaining_bad
             bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
-            test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
-            test_inappropriate_risk = eval_inappropriate_risk(
-                model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
-            )
-            pac_stats = pac_bayes_stats(
-                model,
-                prior_vector,
-                split,
-                config,
-                device,
-                stable_seed(seed, f"{method}-pac-bayes-trace", step + int(pretrain_fraction * 10_000)),
-            )
-            diagnostics = selected_set_diagnostics(
-                model, split.pool, support, device, config.inference_batch_size, config.score
-            )
+            if bound_only:
+                test_error = None
+                test_inappropriate_risk = None
+                pac_stats = {
+                    "pac_bayes_bound": None,
+                    "pac_bayes_empirical_risk": None,
+                    "pac_bayes_mc_upper": None,
+                    "pac_bayes_kl": None,
+                }
+                diagnostics = {
+                    "noise_hit_rate": None,
+                    "duplicate_hit_rate": None,
+                    "pairwise_feature_cosine": None,
+                    "mean_support_redundancy": None,
+                    "max_support_redundancy": None,
+                    "mean_selected_residual_novelty": None,
+                    "local_redundancy_hit_rate": None,
+                    "residual_redundancy_hit_rate": None,
+                    "strong_redundancy_hit_rate": None,
+                    "mode_entropy": None,
+                    "minority_mode_fraction": None,
+                    "spectral_entropy": None,
+                    "dynamic_mu": None,
+                }
+            else:
+                test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+                test_inappropriate_risk = eval_inappropriate_risk(
+                    model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
+                )
+                pac_stats = pac_bayes_stats(
+                    model,
+                    prior_vector,
+                    split,
+                    config,
+                    device,
+                    stable_seed(seed, f"{method}-pac-bayes-trace", step + int(pretrain_fraction * 10_000)),
+                )
+                diagnostics = selected_set_diagnostics(
+                    model, split.pool, support, device, config.inference_batch_size, config.score
+                )
             rows.append(
                 {
                     "method": method,

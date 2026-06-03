@@ -77,6 +77,20 @@ def parse_args() -> argparse.Namespace:
         default=5,
         help="Record risk and ES bound every N selected points, plus step 0 and final Stop/cap rows.",
     )
+    parser.add_argument(
+        "--train-every",
+        type=int,
+        default=1,
+        help=(
+            "Train/update the P2L model every N selected points during tracing. "
+            "Use 1 for the exact one-point P2L path; use record-every for a faster block trace."
+        ),
+    )
+    parser.add_argument(
+        "--bound-only",
+        action="store_true",
+        help="Record only the ES P2L bound fields needed for bound-vs-step plots.",
+    )
 
     parser.add_argument("--n-train", type=int, default=3000)
     parser.add_argument("--n-test", type=int, default=10000)
@@ -132,10 +146,36 @@ def main() -> None:
         for pretrain_fraction in args.pretrain_fractions
         for method in args.methods
     ]
-    progress = tqdm(tasks, desc="PU-P2L ES trace") if tqdm is not None else tasks
+    progress_bar = tqdm(tasks, desc="PU-P2L ES trace") if tqdm is not None else None
+    progress = progress_bar if progress_bar is not None else tasks
     rows: list[dict[str, Any]] = []
     cache: dict[tuple[int, float, float], Any] = {}
     for seed, noise_rate, pretrain_fraction, method in progress:
+        if progress_bar is not None:
+            progress_bar.set_postfix(
+                {
+                    "method": method,
+                    "seed": seed,
+                    "step": 0,
+                    "bad": "-",
+                    "support": "-",
+                },
+                refresh=True,
+            )
+
+        def update_inner_progress(status: dict[str, Any]) -> None:
+            if progress_bar is not None:
+                progress_bar.set_postfix(
+                    {
+                        "method": status["method"],
+                        "seed": status["seed"],
+                        "step": status["step"],
+                        "bad": status["bad"],
+                        "support": status["support"],
+                    },
+                    refresh=True,
+                )
+
         key = (seed, noise_rate, pretrain_fraction)
         if key not in cache:
             bundle = make_dataset_from_args(args, seed, noise_rate)
@@ -149,6 +189,9 @@ def main() -> None:
             config,
             device,
             args.record_every,
+            args.train_every,
+            args.bound_only,
+            update_inner_progress,
         )
         for row in trace_rows:
             row["dataset"] = args.dataset_name
