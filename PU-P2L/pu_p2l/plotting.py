@@ -658,8 +658,25 @@ def plot_es_trace(results_path: Path, plots_dir: Path) -> None:
                     view_methods,
                     noise_rate,
                     pretrain_fraction,
+                    view_dir / f"es_bound_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    boundary_only=True,
+                )
+                plot_step_bound_and_risk(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
                     view_dir
                     / f"es_bound_and_risk_vs_step_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    boundary_only=True,
+                )
+                plot_step_bound_and_risk(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    pretrain_fraction,
+                    view_dir / f"es_bound_vs_step_first_100_noise_{noise_suffix}_pretrain_{pretrain_suffix}.png",
+                    max_step=100,
                     boundary_only=True,
                 )
                 plot_step_bound_and_risk(
