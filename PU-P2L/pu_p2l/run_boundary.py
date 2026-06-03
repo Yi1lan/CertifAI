@@ -113,13 +113,13 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
         "--mode-imbalance",
         type=float,
         default=0.85,
-        help="Mode-A probability for mode_mnist and boundary_duplicate_mnist.",
+        help="Mode-A probability for mode_mnist, boundary_duplicate_mnist, and boundary_duplicate_fashion_mnist.",
     )
     parser.add_argument(
         "--boundary-augmentation",
         type=int,
         default=1,
-        help="Augmentation multiplier marker for boundary_duplicate_mnist; values >1 augment Mode A.",
+        help="Augmentation multiplier marker for boundary duplicate datasets; values >1 augment Mode A.",
     )
     parser.add_argument(
         "--rotation-angles",

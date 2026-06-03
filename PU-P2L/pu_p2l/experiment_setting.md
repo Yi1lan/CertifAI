@@ -26,13 +26,17 @@ export DATA_DIR=data
 export SEEDS5="0 1 2 3 4"
 
 export N_MNIST=5000
+export N_IMAGE=5000
 export N_TEST=10000
 export SUPPORT_MNIST=800
+export SUPPORT_IMAGE=1000
 
 export MNIST_COMMON="--data-dir $DATA_DIR --download-data --device $DEVICE --model-name mnist_fcn --optimizer sgd --momentum 0.95 --batch-size 60000 --inference-batch-size 1024 --pretrain-epochs 20 --p2l-epochs-per-iter 5 --pretrain-lr 0.01 --p2l-lr 0.01 --dropout-prob 0.2 --initial-per-class 2 --mu 1.0 --global-redundancy-weight 1.0 --residual-rank 0 --residual-tol 1e-6 --pac-bayes-samples 0"
+export IMAGE_COMMON="$MNIST_COMMON"
 
 export CORE_METHODS="MaxLoss Marginal PU-R GREATS"
 export TRACE_METHODS="MaxLoss Marginal PU-R"
+export LITERATURE_BOUND_METHODS="PU-R GREATS"
 export PRETRAIN_GRID="0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8"
 export TRACE_PRETRAIN="0.0"
 ```
@@ -255,4 +259,264 @@ To run the whole ES-trace group without typing each command manually:
 
 ```bash
 bash PU-P2L/run_core_mnist_es_trace.sh
+```
+
+## Literature Generalization-Bound Comparison
+
+These experiments compare PU-R against GREATS under the implemented
+generalization-bound baselines:
+
+- PU-R P2L compression certificate
+- PAC-Bayes bound
+- self-selected-data bound
+- ADA growing-data bound
+
+GREATS is included as a practical data-selection reference. The code does not
+assign GREATS a P2L compression certificate, so its P2L curve is intentionally
+absent; its risk and non-P2L literature-bound diagnostics are still reported.
+
+### 1. Clean MNIST, No Redundancy
+
+Noise is `0.0`, redundancy is off, and the plot is generalization bound vs
+pretrain fraction.
+
+```bash
+python -m pu_p2l.run_generalization_bounds \
+  --output-dir results/PU-R/MNIST/literature_bounds/mnist_noise_0 \
+  --dataset-name mnist \
+  $MNIST_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.0 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --methods PU-R GREATS \
+  --n-train $N_MNIST \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_MNIST \
+  --pac-bayes-samples 50 \
+  --pac-bayes-train-epochs 1 \
+  --pac-bayes-scope head
+```
+
+### 2. Noisy MNIST, No Redundancy
+
+Noise is `0.3`, redundancy is off, and the plot is generalization bound vs
+pretrain fraction.
+
+```bash
+python -m pu_p2l.run_generalization_bounds \
+  --output-dir results/PU-R/MNIST/literature_bounds/mnist_noise_0p3 \
+  --dataset-name mnist \
+  $MNIST_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --methods PU-R GREATS \
+  --n-train $N_MNIST \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_MNIST \
+  --pac-bayes-samples 50 \
+  --pac-bayes-train-epochs 1 \
+  --pac-bayes-scope head
+```
+
+### 3. Noisy MNIST, Redundant Boundary Samples
+
+Noise is `0.3`, redundancy is on via `boundary_duplicate_mnist`, and the plot is
+generalization bound vs pretrain fraction.
+
+```bash
+python -m pu_p2l.run_generalization_bounds \
+  --output-dir results/PU-R/MNIST/literature_bounds/boundary_duplicate_noise_0p3_aug5 \
+  --dataset-name boundary_duplicate_mnist \
+  $MNIST_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --methods PU-R GREATS \
+  --n-train $N_MNIST \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_MNIST \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5 \
+  --pac-bayes-samples 50 \
+  --pac-bayes-train-epochs 1 \
+  --pac-bayes-scope head
+```
+
+## Fashion-MNIST Data-Pruning Literature Comparison
+
+These experiments compare PU-R against data-pruning and selection baselines on
+Fashion-MNIST with fixed P2L-ES budgets:
+
+```text
+MaxLoss, Marginal, EL2N, GraNdLast, RHO-PretrainRef, PU-R, GREATS
+```
+
+For redundant Fashion-MNIST we use `boundary_duplicate_fashion_mnist`. This is a
+Fashion-MNIST analogue of `boundary_duplicate_mnist`: it uses ambiguous clothing
+pairs and duplicates the dominant mode through rotated repeated sources. The
+binary pairs are:
+
+```text
+mode 0: T-shirt/top vs shirt
+mode 1: pullover vs coat
+```
+
+### 1. Fashion-MNIST, Noise=0, No Redundancy, ES=50
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es50/noise_0 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.0 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 50 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```
+
+### 2. Fashion-MNIST, Noise=0, No Redundancy, ES=100
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es100/noise_0 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.0 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 100 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```
+
+### 3. Fashion-MNIST, Noise=0, No Redundancy, ES=200
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es200/noise_0 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.0 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 200 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```
+
+### 4. Fashion-MNIST, Noise=0.3, No Redundancy, ES=50
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es50/noise_0p3 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 50 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```
+
+### 5. Fashion-MNIST, Noise=0.3, No Redundancy, ES=100
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es100/noise_0p3 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 100 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```
+
+### 6. Fashion-MNIST, Noise=0.3, No Redundancy, ES=200
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es200/noise_0p3 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 200 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```
+
+### 7. Fashion-MNIST, Noise=0.3, Redundant Boundary Samples, ES=50
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es50/boundary_duplicate_noise_0p3_aug5 \
+  --dataset-name boundary_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 50 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5
+```
+
+### 8. Fashion-MNIST, Noise=0.3, Redundant Boundary Samples, ES=100
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es100/boundary_duplicate_noise_0p3_aug5 \
+  --dataset-name boundary_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 100 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5
+```
+
+### 9. Fashion-MNIST, Noise=0.3, Redundant Boundary Samples, ES=200
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/literature_pruning/es200/boundary_duplicate_noise_0p3_aug5 \
+  --dataset-name boundary_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 200 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5
 ```
