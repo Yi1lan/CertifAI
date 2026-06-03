@@ -66,6 +66,14 @@ GENERALIZATION_BOUND_CURVES = [
     ("self_selected_bound", "self-selected", "-.", 1.5, 0.08),
     ("ada_bound", "ADA growing", (0, (3, 1, 1, 1, 1, 1)), 1.5, 0.08),
 ]
+SELECTION_DIAGNOSTIC_METRICS = [
+    ("noise_hit_rate", "Noise-hit rate"),
+    ("duplicate_hit_rate", "Duplicate-hit rate"),
+    ("pairwise_feature_cosine", "Pairwise feature cosine"),
+    ("strong_redundancy_hit_rate", "Strong redundancy-hit rate"),
+    ("mean_selected_residual_novelty", "Mean selected residual novelty"),
+    ("mode_entropy", "Mode/rotation entropy"),
+]
 
 
 def should_plot_pac_bayes(rows: list[dict[str, str]]) -> bool:
@@ -321,6 +329,12 @@ def plot_boundary(results_path: Path, plots_dir: Path) -> None:
                 "Test Top-1 Error vs Pretrain Fraction",
                 view_dir / f"test_error_vs_pretrain_noise_{suffix}.png",
             )
+            plot_pretrain_selection_diagnostics(
+                rows,
+                view_methods,
+                noise_rate,
+                view_dir / f"selection_diagnostics_vs_pretrain_noise_{suffix}.png",
+            )
 
 
 def plot_generalization_bounds(results_path: Path, plots_dir: Path) -> None:
@@ -467,6 +481,34 @@ def plot_metric(
     plt.close(fig)
 
 
+def plot_pretrain_selection_diagnostics(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    noise_rate: float,
+    path: Path,
+) -> None:
+    fig, axes = plt.subplots(
+        len(SELECTION_DIAGNOSTIC_METRICS),
+        1,
+        figsize=(9, 3.1 * len(SELECTION_DIAGNOSTIC_METRICS)),
+        sharex=True,
+    )
+    for ax, (metric, ylabel) in zip(axes, SELECTION_DIAGNOSTIC_METRICS):
+        for method in methods:
+            xs, means, ses = grouped_curve(rows, method, noise_rate, metric)
+            if not xs:
+                continue
+            plot_mean_band(ax, xs, means, ses, method)
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.25)
+    axes[-1].set_xlabel("Pretrain fraction")
+    axes[0].set_title(f"Selected-Set Diagnostics vs Pretrain Fraction (noise={noise_rate:g})")
+    axes[0].legend(fontsize=9, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
 def plot_es_budget_boundary(results_path: Path, plots_dir: Path) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     rows = read_csv(results_path)
@@ -486,6 +528,14 @@ def plot_es_budget_boundary(results_path: Path, plots_dir: Path) -> None:
                     noise_rate,
                     budget,
                     view_dir / f"es_budget_bound_and_risk_vs_pretrain_noise_{noise_suffix}_budget_{budget}.png",
+                )
+                plot_es_budget_pretrain_selection_diagnostics(
+                    rows,
+                    view_methods,
+                    noise_rate,
+                    budget,
+                    view_dir
+                    / f"es_budget_selection_diagnostics_vs_pretrain_noise_{noise_suffix}_budget_{budget}.png",
                 )
 
 
@@ -553,6 +603,37 @@ def plot_es_budget_bound_and_risk_vs_pretrain(
     )
     ax.grid(alpha=0.25)
     ax.legend(fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def plot_es_budget_pretrain_selection_diagnostics(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    noise_rate: float,
+    es_budget: int,
+    path: Path,
+) -> None:
+    fig, axes = plt.subplots(
+        len(SELECTION_DIAGNOSTIC_METRICS),
+        1,
+        figsize=(9, 3.1 * len(SELECTION_DIAGNOSTIC_METRICS)),
+        sharex=True,
+    )
+    for ax, (metric, ylabel) in zip(axes, SELECTION_DIAGNOSTIC_METRICS):
+        for method in methods:
+            xs, means, ses = grouped_budget_pretrain_curve(rows, method, noise_rate, es_budget, metric)
+            if not xs:
+                continue
+            plot_mean_band(ax, xs, means, ses, method)
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.25)
+    axes[-1].set_xlabel("Pretrain fraction")
+    axes[0].set_title(
+        f"Selected-Set Diagnostics vs Pretrain Fraction (noise={noise_rate:g}, ES={es_budget})"
+    )
+    axes[0].legend(fontsize=9, ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)
@@ -990,16 +1071,13 @@ def plot_redundancy_diagnostics(
     methods: list[str],
     path: Path,
 ) -> None:
-    metrics = [
-        ("noise_hit_rate", "Noise-hit rate"),
-        ("duplicate_hit_rate", "Duplicate-hit rate"),
-        ("pairwise_feature_cosine", "Pairwise feature cosine"),
-        ("strong_redundancy_hit_rate", "Strong redundancy-hit rate"),
-        ("mean_selected_residual_novelty", "Mean selected residual novelty"),
-        ("mode_entropy", "Mode/rotation entropy"),
-    ]
-    fig, axes = plt.subplots(len(metrics), 1, figsize=(9, 3.1 * len(metrics)), sharex=True)
-    for ax, (metric, ylabel) in zip(axes, metrics):
+    fig, axes = plt.subplots(
+        len(SELECTION_DIAGNOSTIC_METRICS),
+        1,
+        figsize=(9, 3.1 * len(SELECTION_DIAGNOSTIC_METRICS)),
+        sharex=True,
+    )
+    for ax, (metric, ylabel) in zip(axes, SELECTION_DIAGNOSTIC_METRICS):
         for method in methods:
             xs, means, ses = grouped_noise_curve(rows, method, metric)
             if not xs:
