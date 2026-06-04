@@ -520,3 +520,100 @@ python -m pu_p2l.run_es_budget_boundary \
   --mode-imbalance 0.85 \
   --boundary-augmentation 5
 ```
+
+## PU-R Extension Stress Tests
+
+These compact experiments are designed specifically for the two PU-R extension
+methods. Both use noise `0.1`, redundant data, and ES budgets `50`, `100`, and
+`200` in one run.
+
+### PU-R-Vol: Low-Volume Redundant Fashion-MNIST
+
+This dataset uses `volume_duplicate_fashion_mnist`, where the dominant
+Fashion-MNIST mode is generated from a small number of repeated sources. This
+creates low spectral diversity in the selected support set, which is the regime
+where `PU-R-Vol` should improve on plain `PU-R`.
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/extensions/pu_r_vol/volume_duplicate_noise_0p1_aug8 \
+  --dataset-name volume_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss Marginal PU-R PU-R-Vol GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.90 \
+  --boundary-augmentation 8 \
+  --alpha 2.0
+```
+
+### PU-R-Manifold: Rotated Redundant Fashion-MNIST
+
+This dataset uses `manifold_duplicate_fashion_mnist`, where repeated dominant
+mode sources are distributed over fixed rotation angles. This creates redundant
+points along a nonlinear rotation manifold, which is the regime where
+`PU-R-Manifold` should improve on plain Euclidean residual novelty.
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/extensions/pu_r_manifold/manifold_duplicate_noise_0p1_aug5 \
+  --dataset-name manifold_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss Marginal PU-R PU-R-Manifold GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5 \
+  --rotation-angles -60 -30 0 30 60 \
+  --manifold-k 5 \
+  --manifold-tau 0.2 \
+  --manifold-eigenvectors 8
+```
+
+## Time-Matched Literature Ablation
+
+This ablation tests the runtime concern directly. For each seed and noise level,
+the code first runs `PU-R` to `ES=50` on Fashion-MNIST and records the
+selection-loop wall-clock time `t`. It then runs each comparison method for the
+same time `t`; faster methods may therefore reach more than 50 selected steps.
+
+The timer covers the P2L selection/update loop only. Shared pretraining, final
+test evaluation, certificate computation, diagnostics, CSV writing, and plotting
+are outside the time budget. This makes the result a selector-efficiency
+comparison, not a replacement for the fixed-ES comparisons above.
+
+The plots include:
+
+- risk/P2L bound vs label-noise rate
+- clean test error vs label-noise rate
+- effective compression size vs label-noise rate
+- selected steps reached vs label-noise rate
+- measured selection-loop runtime vs label-noise rate
+
+### Fashion-MNIST, No Redundancy, Time-Matched to PU-R ES=50
+
+```bash
+python -m pu_p2l.run_time_matched_noise \
+  --output-dir results/PU-R/FashionMNIST/time_matched_literature/pur_es50/no_redundancy \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.0 0.1 0.2 0.3 \
+  --pretrain-fractions 0.3 \
+  --reference-method PU-R \
+  --reference-es-budget 50 \
+  --methods MaxLoss Marginal EL2N GraNdLast RHO-PretrainRef PU-R GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE
+```

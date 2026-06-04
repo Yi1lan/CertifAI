@@ -10,6 +10,7 @@ from .plotting import (
     plot_es_trace,
     plot_generalization_bounds,
     plot_noise,
+    plot_time_matched_noise,
 )
 
 
@@ -20,7 +21,15 @@ def parse_args() -> argparse.Namespace:
         "--kind",
         type=str,
         required=True,
-        choices=["boundary", "noise", "es_trace", "es_budget_boundary", "es_budget_noise", "generalization_bounds"],
+        choices=[
+            "boundary",
+            "noise",
+            "es_trace",
+            "es_budget_boundary",
+            "es_budget_noise",
+            "generalization_bounds",
+            "time_matched_noise",
+        ],
     )
     return parser.parse_args()
 
@@ -40,6 +49,8 @@ def main() -> None:
         plot_es_budget_noise(results_path, plots_dir)
     elif args.kind == "generalization_bounds":
         plot_generalization_bounds(results_path, plots_dir)
+    elif args.kind == "time_matched_noise":
+        plot_time_matched_noise(results_path, plots_dir)
     else:
         plot_noise(results_path, plots_dir)
 

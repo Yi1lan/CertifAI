@@ -291,6 +291,37 @@ def grouped_budget_noise_curve(
     return xs, means, ses
 
 
+def grouped_time_matched_noise_curve(
+    rows: list[dict[str, str]],
+    method: str,
+    pretrain_fraction: float,
+    reference_es_budget: int,
+    metric: str,
+) -> tuple[list[float], list[float], list[float]]:
+    groups: dict[float, list[float]] = defaultdict(list)
+    for row in rows:
+        if row["method"] != method:
+            continue
+        budget_value = to_float(row, "reference_es_budget")
+        if np.isnan(budget_value):
+            budget_value = to_float(row, "es_budget")
+        if np.isnan(budget_value) or int(budget_value) != reference_es_budget:
+            continue
+        if abs(to_float(row, "pretrain_fraction") - pretrain_fraction) > 1e-12:
+            continue
+        x = to_float(row, "noise_rate")
+        y = to_float(row, metric)
+        if not np.isnan(x) and not np.isnan(y):
+            groups[x].append(y)
+    xs = sorted(groups)
+    means = [float(np.mean(groups[x])) for x in xs]
+    ses = [
+        float(np.std(groups[x], ddof=1) / np.sqrt(len(groups[x]))) if len(groups[x]) > 1 else 0.0
+        for x in xs
+    ]
+    return xs, means, ses
+
+
 def plot_boundary(results_path: Path, plots_dir: Path) -> None:
     plots_dir.mkdir(parents=True, exist_ok=True)
     rows = read_csv(results_path)
@@ -1009,6 +1040,166 @@ def plot_es_budget_noise_metric(
     ax.set_title(title)
     ax.grid(alpha=0.25)
     ax.legend(fontsize=9)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def plot_time_matched_noise(results_path: Path, plots_dir: Path) -> None:
+    plots_dir.mkdir(parents=True, exist_ok=True)
+    rows = read_csv(results_path)
+    methods = [method for method in BOUND_METHOD_ORDER if any(row["method"] == method for row in rows)]
+    pretrain_fractions = sorted({to_float(row, "pretrain_fraction") for row in rows})
+    reference_budgets = sorted(
+        {
+            int(value)
+            for row in rows
+            for value in [to_float(row, "reference_es_budget", to_float(row, "es_budget"))]
+            if not np.isnan(value)
+        }
+    )
+
+    for view_name, view_methods in method_views(methods):
+        view_dir = plots_dir / view_name
+        view_dir.mkdir(parents=True, exist_ok=True)
+        for reference_budget in reference_budgets:
+            for pretrain_fraction in pretrain_fractions:
+                pretrain_suffix = format_float_for_filename(pretrain_fraction)
+                plot_time_matched_bounds_vs_noise(
+                    rows,
+                    view_methods,
+                    reference_budget,
+                    pretrain_fraction,
+                    view_dir
+                    / f"time_matched_bounds_vs_noise_pur_es{reference_budget}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_time_matched_noise_metric(
+                    rows,
+                    view_methods,
+                    reference_budget,
+                    pretrain_fraction,
+                    "test_error",
+                    "Clean test error",
+                    (
+                        "Time-Matched Clean Test Error vs Label-Noise Rate "
+                        f"(PU-R ES={reference_budget}, pretrain={pretrain_fraction:g})"
+                    ),
+                    view_dir
+                    / f"time_matched_clean_test_error_vs_noise_pur_es{reference_budget}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_time_matched_noise_metric(
+                    rows,
+                    view_methods,
+                    reference_budget,
+                    pretrain_fraction,
+                    "effective_compression_size",
+                    "Effective compression size",
+                    (
+                        "Time-Matched Effective Compression Size vs Label-Noise Rate "
+                        f"(PU-R ES={reference_budget}, pretrain={pretrain_fraction:g})"
+                    ),
+                    view_dir
+                    / f"time_matched_effective_compression_vs_noise_pur_es{reference_budget}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_time_matched_noise_metric(
+                    rows,
+                    view_methods,
+                    reference_budget,
+                    pretrain_fraction,
+                    "step",
+                    "Selected steps reached",
+                    (
+                        "Selected Steps Reached Under PU-R Time Budget vs Label-Noise Rate "
+                        f"(PU-R ES={reference_budget}, pretrain={pretrain_fraction:g})"
+                    ),
+                    view_dir / f"time_matched_steps_vs_noise_pur_es{reference_budget}_pretrain_{pretrain_suffix}.png",
+                )
+                plot_time_matched_noise_metric(
+                    rows,
+                    view_methods,
+                    reference_budget,
+                    pretrain_fraction,
+                    "selection_runtime_sec",
+                    "Selection-loop runtime seconds",
+                    (
+                        "Selection Runtime vs Label-Noise Rate "
+                        f"(PU-R ES={reference_budget}, pretrain={pretrain_fraction:g})"
+                    ),
+                    view_dir
+                    / f"time_matched_selection_runtime_vs_noise_pur_es{reference_budget}_pretrain_{pretrain_suffix}.png",
+                )
+
+
+def plot_time_matched_bounds_vs_noise(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    reference_es_budget: int,
+    pretrain_fraction: float,
+    path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9, 5.2))
+    show_pac_bayes = should_plot_pac_bayes(rows)
+    for method in methods:
+        xs, means, ses = grouped_time_matched_noise_curve(
+            rows, method, pretrain_fraction, reference_es_budget, "test_inappropriate_risk"
+        )
+        if xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} risk", linestyle="-", alpha=0.16)
+
+        xs, means, ses = grouped_time_matched_noise_curve(
+            rows, method, pretrain_fraction, reference_es_budget, "certified_bound"
+        )
+        if xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} P2L", linestyle="--", alpha=0.10)
+
+        xs, means, ses = grouped_time_matched_noise_curve(
+            rows, method, pretrain_fraction, reference_es_budget, "pac_bayes_bound"
+        )
+        if show_pac_bayes and xs:
+            plot_mean_band(ax, xs, means, ses, method, label=f"{method} PAC-Bayes", linestyle=":", alpha=0.08)
+
+    ax.set_xlabel("Label-noise rate")
+    ax.set_ylabel(
+        "Test inappropriate risk / time-matched generalization bound"
+        if show_pac_bayes
+        else "Test inappropriate risk / time-matched P2L bound"
+    )
+    title = "Time-Matched P2L/PAC-Bayes Bounds" if show_pac_bayes else "Time-Matched P2L Bound"
+    ax.set_title(f"{title} vs Label-Noise Rate (PU-R ES={reference_es_budget}, pretrain={pretrain_fraction:g})")
+    ax.grid(alpha=0.25)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, fontsize=8, ncol=2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def plot_time_matched_noise_metric(
+    rows: list[dict[str, str]],
+    methods: list[str],
+    reference_es_budget: int,
+    pretrain_fraction: float,
+    metric: str,
+    ylabel: str,
+    title: str,
+    path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(9, 5.2))
+    for method in methods:
+        xs, means, ses = grouped_time_matched_noise_curve(
+            rows, method, pretrain_fraction, reference_es_budget, metric
+        )
+        if not xs:
+            continue
+        plot_mean_band(ax, xs, means, ses, method)
+    ax.set_xlabel("Label-noise rate")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.grid(alpha=0.25)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(handles, labels, fontsize=9)
     fig.tight_layout()
     fig.savefig(path, dpi=180)
     plt.close(fig)

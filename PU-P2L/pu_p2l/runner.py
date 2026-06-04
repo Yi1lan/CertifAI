@@ -119,6 +119,13 @@ def set_all_seeds(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def synchronize_device(device: torch.device) -> None:
+    if device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.synchronize(device)
+    elif device.type == "mps" and hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+        torch.mps.synchronize()
+
+
 def frozen_reference_model(model: nn.Module) -> nn.Module:
     reference = copy.deepcopy(model)
     reference.eval()
@@ -838,6 +845,198 @@ def run_p2l_es_budgets(
         support_set.add(chosen)
 
     return rows
+
+
+def run_p2l_time_budget(
+    method: str,
+    seed: int,
+    noise_rate: float,
+    pretrain_fraction: float,
+    split: SplitBundle,
+    config: RunConfig,
+    device: torch.device,
+    reference_method: str,
+    reference_es_budget: int,
+    time_budget_sec: float | None = None,
+    target_step: int | None = None,
+) -> dict[str, Any]:
+    if time_budget_sec is None and target_step is None:
+        raise ValueError("run_p2l_time_budget requires either time_budget_sec or target_step.")
+    if time_budget_sec is not None and time_budget_sec < 0:
+        raise ValueError("time_budget_sec must be non-negative.")
+    if target_step is not None and target_step < 0:
+        raise ValueError("target_step must be non-negative.")
+
+    started = time.perf_counter()
+    set_all_seeds(stable_seed(seed, method, int(pretrain_fraction * 10_000)))
+    model = make_run_model(
+        stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
+    )
+
+    if len(split.y_pretrain):
+        train_model(
+            model,
+            split.x_pretrain,
+            split.y_pretrain,
+            epochs=config.pretrain_epochs,
+            lr=config.pretrain_lr,
+            batch_size=config.batch_size,
+            device=device,
+            weight_decay=config.weight_decay,
+            optimizer_name=config.optimizer,
+            momentum=config.momentum,
+            nesterov=config.nesterov,
+        )
+    prior_vector = parameter_vector(model, pac_bayes_parameter_names(model, config.pac_bayes_scope))
+    reference_model = frozen_reference_model(model) if method == "RHO-PretrainRef" else None
+
+    support = deterministic_initial_support(split.pool, config.initial_per_class, seed)
+    initial_support_size = len(support)
+    support_set = set(support)
+    if target_step is None:
+        limit = min(max(config.max_total_support, len(support)), len(split.pool.y))
+    else:
+        limit = min(max(config.max_total_support, len(support)), len(split.pool.y), initial_support_size + target_step)
+    train_calls = 0
+
+    if method == "GREATS":
+        probe_x, probe_y = deterministic_probe(split.pool, split, config.greats_probe_size, seed)
+    else:
+        probe_x = np.empty((0, *split.pool.x.shape[1:]), dtype=np.float32)
+        probe_y = np.empty((0,), dtype=np.int64)
+
+    synchronize_device(device)
+    selection_started = time.perf_counter()
+    selection_runtime_sec = 0.0
+    step = 0
+    stop_reached = False
+    hit_limit = False
+    target_step_hit = False
+    time_budget_hit = False
+    remaining_bad = len(split.pool.y)
+
+    while True:
+        if support:
+            support_arr = np.asarray(support, dtype=np.int64)
+            train_model(
+                model,
+                split.pool.x[support_arr],
+                split.pool.y[support_arr],
+                epochs=config.p2l_epochs_per_iter,
+                lr=config.p2l_lr,
+                batch_size=config.batch_size,
+                device=device,
+                weight_decay=config.weight_decay,
+                optimizer_name=config.optimizer,
+                momentum=config.momentum,
+                nesterov=config.nesterov,
+            )
+            train_calls += 1
+
+        step = max(0, len(support) - initial_support_size)
+        non_support = np.asarray([idx for idx in range(len(split.pool.y)) if idx not in support_set], dtype=np.int64)
+        bad_local = np.array([], dtype=np.int64)
+        losses = np.array([], dtype=np.float64)
+
+        if len(non_support) == 0:
+            remaining_bad = 0
+            stop_reached = True
+        else:
+            losses = compute_losses(
+                model, split.pool.x[non_support], split.pool.y[non_support], device, config.inference_batch_size
+            )
+            bad_local = np.flatnonzero(losses > config.gamma)
+            remaining_bad = int(len(bad_local))
+            stop_reached = remaining_bad == 0
+
+        synchronize_device(device)
+        selection_runtime_sec = time.perf_counter() - selection_started
+        hit_limit = (not stop_reached) and len(support) >= limit
+        target_step_hit = target_step is not None and step >= target_step
+        time_budget_hit = time_budget_sec is not None and selection_runtime_sec >= time_budget_sec
+        if stop_reached or hit_limit or target_step_hit or time_budget_hit:
+            break
+
+        bad_candidates = non_support[bad_local]
+        bad_losses = losses[bad_local]
+        chosen = choose_next(
+            method,
+            model,
+            split.pool,
+            support,
+            bad_candidates,
+            bad_losses,
+            config,
+            device,
+            probe_x,
+            probe_y,
+            reference_model,
+        )
+        support.append(chosen)
+        support_set.add(chosen)
+
+    effective_size = len(support) if stop_reached else len(support) + remaining_bad
+    bound = p2l_bound(effective_size, len(split.pool.y), config.delta) if method in CERTIFIED_METHODS else None
+    test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
+    test_inappropriate_risk = eval_inappropriate_risk(
+        model, split.x_test, split.y_test, config.gamma, device, config.inference_batch_size
+    )
+    pac_stats = pac_bayes_stats(
+        model,
+        prior_vector,
+        split,
+        config,
+        device,
+        stable_seed(seed, f"{method}-pac-bayes-time-matched", step + int(pretrain_fraction * 10_000)),
+    )
+    diagnostics = selected_set_diagnostics(model, split.pool, support, device, config.inference_batch_size, config.score)
+    synchronize_device(device)
+    runtime_sec = time.perf_counter() - started
+
+    if stop_reached:
+        stopping_condition = "stop_reached"
+    elif hit_limit:
+        stopping_condition = "support_limit"
+    elif target_step_hit:
+        stopping_condition = "target_step"
+    elif time_budget_hit:
+        stopping_condition = "time_budget"
+    else:
+        stopping_condition = "unknown"
+
+    budget_value = selection_runtime_sec if time_budget_sec is None else float(time_budget_sec)
+    return {
+        "method": method,
+        "seed": seed,
+        "noise_rate": noise_rate,
+        "pretrain_fraction": pretrain_fraction,
+        "reference_method": reference_method,
+        "reference_es_budget": reference_es_budget,
+        "es_budget": reference_es_budget,
+        "target_step": target_step,
+        "time_budget_sec": budget_value,
+        "selection_runtime_sec": selection_runtime_sec,
+        "time_budget_overrun_sec": max(0.0, selection_runtime_sec - budget_value),
+        "time_budget_ratio": selection_runtime_sec / budget_value if budget_value > 0 else 1.0,
+        "stopping_condition": stopping_condition,
+        "time_budget_hit": int(time_budget_hit),
+        "target_step_hit": int(target_step_hit),
+        "step": step,
+        "n_cert": len(split.pool.y),
+        "n_pretrain": len(split.y_pretrain),
+        "compression_size": len(support),
+        "remaining_bad": remaining_bad,
+        "effective_compression_size": effective_size,
+        "certified_bound": bound,
+        "test_error": test_error,
+        "test_inappropriate_risk": test_inappropriate_risk,
+        **pac_stats,
+        "runtime_sec": runtime_sec,
+        "stop_reached": int(stop_reached),
+        "hit_limit": int(hit_limit),
+        "train_calls": train_calls,
+        **diagnostics,
+    }
 
 
 def selected_set_diagnostics(

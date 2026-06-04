@@ -113,7 +113,10 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
         "--mode-imbalance",
         type=float,
         default=0.85,
-        help="Mode-A probability for mode_mnist, boundary_duplicate_mnist, and boundary_duplicate_fashion_mnist.",
+        help=(
+            "Mode-A probability for mode_mnist, boundary_duplicate_mnist, boundary_duplicate_fashion_mnist, "
+            "volume_duplicate_fashion_mnist, and manifold_duplicate_fashion_mnist."
+        ),
     )
     parser.add_argument(
         "--boundary-augmentation",
@@ -126,7 +129,7 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         nargs="+",
         default=[-60.0, -30.0, 0.0, 30.0, 60.0],
-        help="Fixed rotation angles for rotated_mnist and rotated_fashion_mnist.",
+        help="Fixed rotation angles for rotated and manifold duplicate datasets.",
     )
 
 
