@@ -132,7 +132,8 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
         help=(
             "Mode-A probability for mode_mnist, boundary_duplicate_mnist, boundary_duplicate_fashion_mnist, "
             "volume_duplicate_fashion_mnist, volume_gap_fashion_mnist, manifold_duplicate_fashion_mnist, "
-            "and manifold_orbit_fashion_mnist."
+            "volume_group_noise_fashion_mnist, manifold_orbit_fashion_mnist, and "
+            "manifold_group_noise_fashion_mnist."
         ),
     )
     parser.add_argument(
@@ -140,8 +141,8 @@ def add_dataset_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=1,
         help=(
-            "Augmentation multiplier marker for boundary, volume-gap, and manifold-orbit duplicate datasets; "
-            "values >1 augment Mode A."
+            "Augmentation multiplier marker for boundary, volume-gap, group-noise, and manifold-orbit "
+            "duplicate datasets; values >1 augment Mode A."
         ),
     )
     parser.add_argument(

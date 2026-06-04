@@ -175,7 +175,9 @@ def score_pu_r_manifold(
     cand_stats: ModelStats,
     config: ScoreConfig,
 ) -> np.ndarray:
-    clipped_loss, residual_novelty, _ = residual_score_terms(candidate_losses, support_stats, cand_stats, config)
+    clipped_loss, residual_novelty, local_redundancy = residual_score_terms(
+        candidate_losses, support_stats, cand_stats, config
+    )
     if len(support_stats.embeddings) <= 2:
         return score_pu_r(candidate_losses, support_stats, cand_stats, config)
 
@@ -208,10 +210,12 @@ def score_pu_r_manifold(
         smooth_coverage = np.clip(smooth_coverage, 0.0, 1.0)
         geodesic_residual_novelty = np.clip(residual_novelty * (1.0 - smooth_coverage), 0.0, 1.0)
 
+    conservative_redundancy = np.maximum(local_redundancy, geodesic_redundancy)
+    conservative_novelty = np.minimum(residual_novelty, geodesic_residual_novelty)
     return (
         clipped_loss
-        + config.mu * geodesic_residual_novelty
-        - config.global_redundancy_weight * geodesic_redundancy
+        + config.mu * conservative_novelty
+        - config.global_redundancy_weight * conservative_redundancy
     )
 
 

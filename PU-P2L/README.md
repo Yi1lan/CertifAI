@@ -79,7 +79,7 @@ Certified selectors, using the P2L/P2L-ES certificate:
   trained only on the pretraining split.
 - `PU-R`: clipped loss plus residual novelty minus local redundancy.
 - `PU-R-Vol`: PU-R with deterministic spectral-entropy volume adaptation of novelty and redundancy weights.
-- `PU-R-Manifold`: PU-R with deterministic support-graph manifold adaptation.
+- `PU-R-Manifold`: PU-R with conservative deterministic support-graph manifold adaptation.
 
 Non-certified reference:
 
@@ -108,6 +108,9 @@ Use `--dataset-name` with one of:
 - `fashion_mnist`: ten-class Fashion-MNIST
 - `mode_mnist`: binary `{3,4}` vs `{5,9}` with controllable mode imbalance
 - `boundary_duplicate_mnist`: `mode_mnist` plus redundant boundary-like samples
+- `boundary_duplicate_fashion_mnist`: Fashion-MNIST analogue with redundant boundary-like samples
+- `volume_group_noise_fashion_mnist`: low-volume Fashion-MNIST source groups with group-correlated label noise
+- `manifold_group_noise_fashion_mnist`: rotated Fashion-MNIST source orbits with group-correlated label noise
 - `rotated_mnist`: deterministic fixed-angle rotated MNIST
 - `rotated_fashion_mnist`: deterministic fixed-angle rotated Fashion-MNIST
 - `two_moons`: synthetic two-moons manifold diagnostic

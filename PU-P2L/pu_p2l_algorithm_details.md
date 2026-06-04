@@ -447,7 +447,15 @@ Geodesic redundancy is:
 R_geo(i) = max_j S_geo(i, j)
 ```
 
-This replaces `R_loc(i)` in the final score.
+The implementation uses the stricter of local and graph redundancy:
+
+```text
+R_man(i) = max(R_loc(i), R_geo(i))
+```
+
+This conservative rule is deliberate. The manifold graph should add a
+redundancy signal for augmented/orbit-like copies, but it should not be allowed
+to weaken the ordinary local cosine redundancy check.
 
 ### Manifold Residual Novelty
 
@@ -486,10 +494,20 @@ If no nontrivial eigenvectors are available, the code uses:
 N_geo_res(i) = N_res(i)
 ```
 
+The final novelty term is:
+
+```text
+N_man(i) = min(N_res(i), N_geo_res(i))
+```
+
+This again makes the graph refinement conservative relative to PU-R: the graph
+can reduce novelty for already-covered manifold neighborhoods, but it cannot
+inflate novelty beyond the Euclidean residual novelty.
+
 ### Score
 
 ```text
-q_PU-R-Manifold(i) = bar_loss_i + mu * N_geo_res(i) - beta * R_geo(i)
+q_PU-R-Manifold(i) = bar_loss_i + mu * N_man(i) - beta * R_man(i)
 ```
 
 PU-R-Manifold is preferent because every graph, affinity, eigendecomposition,
