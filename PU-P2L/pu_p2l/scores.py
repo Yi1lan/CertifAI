@@ -122,9 +122,10 @@ def score_pu_r_vol(
         candidate_losses, support_stats, cand_stats, config
     )
     spectral_entropy = normalized_spectral_entropy(support_stats.embeddings, config.residual_tol)
-    novelty_boost = max(float(config.alpha), 0.0) * (1.0 - spectral_entropy)
-    dynamic_mu = config.mu * (1.0 + novelty_boost)
-    return clipped_loss + dynamic_mu * residual_novelty - config.global_redundancy_weight * local_redundancy
+    concentration = max(float(config.alpha), 0.0) * (1.0 - spectral_entropy)
+    dynamic_mu = config.mu * (1.0 + concentration)
+    dynamic_redundancy = config.global_redundancy_weight * (1.0 + concentration)
+    return clipped_loss + dynamic_mu * residual_novelty - dynamic_redundancy * local_redundancy
 
 
 def cosine_distance(left_unit: np.ndarray, right_unit: np.ndarray) -> np.ndarray:

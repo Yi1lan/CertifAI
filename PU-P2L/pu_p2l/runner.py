@@ -650,6 +650,7 @@ def run_p2l_trace(
                     "minority_mode_fraction": None,
                     "spectral_entropy": None,
                     "dynamic_mu": None,
+                    "dynamic_redundancy_weight": None,
                 }
             else:
                 test_error = eval_error(model, split.x_test, split.y_test, device, config.inference_batch_size)
@@ -1103,6 +1104,8 @@ def selected_set_diagnostics(
             "minority_mode_fraction": 0.0,
             "spectral_entropy": 0.0,
             "dynamic_mu": score_config.mu * (1.0 + max(float(score_config.alpha), 0.0)),
+            "dynamic_redundancy_weight": score_config.global_redundancy_weight
+            * (1.0 + max(float(score_config.alpha), 0.0)),
         }
     selected_arr = np.asarray(selected, dtype=np.int64)
     stats = model_stats(model, pool.x[selected_arr], pool.y[selected_arr], device, batch_size)
@@ -1160,7 +1163,9 @@ def selected_set_diagnostics(
         max_group_selection_fraction = 0.0
 
     spectral_entropy = normalized_spectral_entropy(stats.embeddings, score_config.residual_tol)
-    dynamic_mu = score_config.mu * (1.0 + max(float(score_config.alpha), 0.0) * (1.0 - spectral_entropy))
+    concentration = max(float(score_config.alpha), 0.0) * (1.0 - spectral_entropy)
+    dynamic_mu = score_config.mu * (1.0 + concentration)
+    dynamic_redundancy_weight = score_config.global_redundancy_weight * (1.0 + concentration)
     return {
         "noise_hit_rate": float(np.mean(pool.is_noisy[selected_arr])),
         "duplicate_hit_rate": float(np.mean(pool.is_duplicate[selected_arr])),
@@ -1178,6 +1183,7 @@ def selected_set_diagnostics(
         "minority_mode_fraction": minority_mode_fraction,
         "spectral_entropy": spectral_entropy,
         "dynamic_mu": dynamic_mu,
+        "dynamic_redundancy_weight": dynamic_redundancy_weight,
     }
 
 

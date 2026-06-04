@@ -48,6 +48,7 @@ RESULT_FIELDS = [
     "minority_mode_fraction",
     "spectral_entropy",
     "dynamic_mu",
+    "dynamic_redundancy_weight",
 ]
 
 SUMMARY_NUMERIC_FIELDS = [
@@ -81,6 +82,7 @@ SUMMARY_NUMERIC_FIELDS = [
     "minority_mode_fraction",
     "spectral_entropy",
     "dynamic_mu",
+    "dynamic_redundancy_weight",
 ]
 
 MARGINAL_METHODS = {

@@ -287,14 +287,14 @@ functions of the current support embeddings and current model.
 
 ## 8. PU-R-Vol: Spectral-Entropy Volume Selector
 
-PU-R uses a constant novelty weight `mu`. PU-R-Vol makes this weight depend on
-the current support span volume.
+PU-R uses constant novelty and redundancy weights. PU-R-Vol makes both weights
+depend on the current support span volume.
 
 The motivation is simple: when the support span has low spectral entropy, the
 selected support points occupy a small or anisotropic part of representation
-space. In that stage, residual novelty should be emphasized more. Once the
-support span has high spectral entropy, the method should return toward the
-base PU-R behavior and focus more on loss and local redundancy.
+space. In that stage, residual novelty should be emphasized more and repeated
+local directions should be penalized more strongly. Once the support span has
+high spectral entropy, the method should return toward the base PU-R behavior.
 
 ### Spectral Entropy
 
@@ -324,26 +324,33 @@ Thus:
 Low entropy means support directions are concentrated. High entropy means the
 support energy is more evenly spread across retained directions.
 
-### Dynamic Novelty Weight
+### Dynamic Volume Weights
 
-The implemented dynamic novelty coefficient is:
+The implemented dynamic coefficients are:
 
 ```text
-mu_t = mu * (1 + max(alpha, 0) * (1 - H_spec(T_t)))
+c_t = max(alpha, 0) * (1 - H_spec(T_t))
+mu_t = mu * (1 + c_t)
+beta_t = beta * (1 + c_t)
 ```
 
 This is important. A formula like `mu * H_spec(T_t)` would reduce novelty
 pressure when entropy is low, which contradicts the intended volume-expansion
-behavior.
+behavior. Increasing only `mu_t` is also too weak in highly redundant image
+settings, because it can reward novel high-loss outliers without discouraging
+near-duplicate directions. The current implementation therefore increases both
+the residual-novelty reward and the local-redundancy penalty when support
+volume is concentrated.
 
 ### Score
 
 ```text
-q_PU-R-Vol(i) = bar_loss_i + mu_t * N_res(i) - beta * R_loc(i)
+q_PU-R-Vol(i) = bar_loss_i + mu_t * N_res(i) - beta_t * R_loc(i)
 ```
 
 PU-R-Vol is preferent because `H_spec(T_t)` is computed deterministically from
-the current support embeddings.
+the current support embeddings, and `mu_t` and `beta_t` are deterministic
+functions of the current support set and fixed hyperparameters.
 
 Mathematical status: PU-R-Vol does not introduce a new generalization theorem.
 It uses the same P2L certificate as PU-R. Its value is empirical: it may reduce
@@ -578,8 +585,8 @@ The score-related CLI flags are:
     beta, the local or geodesic redundancy penalty.
 
 --alpha
-    PU-R-Vol entropy boost. Higher values increase residual novelty pressure
-    when support spectral entropy is low.
+    PU-R-Vol entropy boost. Higher values increase both residual novelty
+    pressure and local-redundancy pressure when support spectral entropy is low.
 
 --residual-rank
     Maximum number of SVD support-span directions for PU-R and PU-R-Vol.

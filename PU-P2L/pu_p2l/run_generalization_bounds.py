@@ -104,6 +104,7 @@ GENERALIZATION_FIELDS = [
     "minority_mode_fraction",
     "spectral_entropy",
     "dynamic_mu",
+    "dynamic_redundancy_weight",
 ]
 
 

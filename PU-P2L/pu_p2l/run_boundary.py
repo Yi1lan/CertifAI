@@ -109,7 +109,10 @@ def add_score_args(parser: argparse.ArgumentParser) -> None:
         "--alpha",
         type=float,
         default=0.5,
-        help="PU-R-Vol entropy boost. Larger values emphasize residual novelty when support spectral entropy is low.",
+        help=(
+            "PU-R-Vol entropy boost. Larger values emphasize residual novelty and local-redundancy "
+            "penalty when support spectral entropy is low."
+        ),
     )
     parser.add_argument("--mu", type=float, default=0.25)
     parser.add_argument("--lambda-redundancy", type=float, default=1.0)

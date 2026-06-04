@@ -78,7 +78,7 @@ Certified selectors, using the P2L/P2L-ES certificate:
 - `RHO-PretrainRef`: deterministic reducible-loss score using a frozen model
   trained only on the pretraining split.
 - `PU-R`: clipped loss plus residual novelty minus local redundancy.
-- `PU-R-Vol`: PU-R with deterministic spectral-entropy volume adaptation.
+- `PU-R-Vol`: PU-R with deterministic spectral-entropy volume adaptation of novelty and redundancy weights.
 - `PU-R-Manifold`: PU-R with deterministic support-graph manifold adaptation.
 
 Non-certified reference:
