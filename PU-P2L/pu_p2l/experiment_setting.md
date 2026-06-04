@@ -604,6 +604,225 @@ python -m pu_p2l.run_es_budget_boundary \
   --manifold-eigenvectors 8
 ```
 
+## Source-Orbit Extension Validation
+
+The previous extension stress tests are broad but do not isolate the extension
+mechanisms strongly enough. The following experiments use datasets whose group
+IDs are source-orbit IDs, so the diagnostics can directly measure whether a
+selector repeatedly picks augmented copies from the same source.
+
+These commands exclude `Marginal` because it is not a reportable method. They
+also use a compact pretrain grid to keep the runs practical while still checking
+low, medium, and high pretraining regimes.
+
+### PU-R-Vol: Low-Volume Gap Dataset
+
+This dataset uses `volume_gap_fashion_mnist`. The dominant mode is generated
+from a very small number of repeated source images with tiny perturbations,
+while the remaining mode is more diverse. This creates support-volume collapse,
+where plain `PU-R` can remain close to the repeated dominant source groups.
+`PU-R-Vol` is tested with a stronger entropy-driven novelty boost.
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/extensions_v2/pu_r_vol/volume_gap_noise_0p1_aug16 \
+  --dataset-name volume_gap_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.0 0.3 0.6 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Vol GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.95 \
+  --boundary-augmentation 16 \
+  --mu 0.35 \
+  --alpha 4.0 \
+  --global-redundancy-weight 1.0
+```
+
+### PU-R-Manifold: Source-Orbit Rotation Dataset
+
+This dataset uses `manifold_orbit_fashion_mnist`. Repeated dominant-mode samples
+are generated as rotation orbits of the same source images, and all copies from
+the same source share one group ID. This is the intended setting for
+`PU-R-Manifold`: Euclidean residual novelty may treat rotated copies as new,
+while the graph-diffusion penalty should reduce repeated orbit selection.
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/extensions_v2/pu_r_manifold/manifold_orbit_noise_0p1_aug10 \
+  --dataset-name manifold_orbit_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.0 0.3 0.6 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Manifold GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.90 \
+  --boundary-augmentation 10 \
+  --rotation-angles -45 -30 -15 0 15 30 45 \
+  --mu 0.5 \
+  --global-redundancy-weight 0.75 \
+  --manifold-k 7 \
+  --manifold-tau 0.8 \
+  --manifold-eigenvectors 8
+```
+
+After running these two commands, generate paired extension evidence:
+
+```bash
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/FashionMNIST/extensions_v2/pu_r_vol \
+  --output-dir results/PU-R/statistical_evidence/extensions_v2/pu_r_vol \
+  --target-method PU-R-Vol \
+  --baselines PU-R MaxLoss GREATS \
+  --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate group_revisit_rate unique_group_fraction mode_entropy spectral_entropy runtime_sec
+
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/FashionMNIST/extensions_v2/pu_r_manifold \
+  --output-dir results/PU-R/statistical_evidence/extensions_v2/pu_r_manifold \
+  --target-method PU-R-Manifold \
+  --baselines PU-R MaxLoss GREATS \
+  --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate group_revisit_rate unique_group_fraction mode_entropy spectral_entropy runtime_sec
+```
+
+## Extension Hyperparameter Sensitivity
+
+Run these only after the source-orbit validation runs. They are designed to show
+whether the extension gains are stable around the selected setting rather than
+being a single-point artifact.
+
+### PU-R-Vol Alpha Sensitivity
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/hyperparameter_sensitivity/pu_r_vol/alpha_2 \
+  --dataset-name volume_gap_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Vol GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.95 \
+  --boundary-augmentation 16 \
+  --mu 0.35 \
+  --alpha 2.0 \
+  --global-redundancy-weight 1.0
+
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/hyperparameter_sensitivity/pu_r_vol/alpha_4 \
+  --dataset-name volume_gap_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Vol GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.95 \
+  --boundary-augmentation 16 \
+  --mu 0.35 \
+  --alpha 4.0 \
+  --global-redundancy-weight 1.0
+
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/hyperparameter_sensitivity/pu_r_vol/alpha_6 \
+  --dataset-name volume_gap_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Vol GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.95 \
+  --boundary-augmentation 16 \
+  --mu 0.35 \
+  --alpha 6.0 \
+  --global-redundancy-weight 1.0
+```
+
+### PU-R-Manifold Tau Sensitivity
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/hyperparameter_sensitivity/pu_r_manifold/tau_0p5 \
+  --dataset-name manifold_orbit_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Manifold GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.90 \
+  --boundary-augmentation 10 \
+  --rotation-angles -45 -30 -15 0 15 30 45 \
+  --mu 0.5 \
+  --global-redundancy-weight 0.75 \
+  --manifold-k 7 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 8
+
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/hyperparameter_sensitivity/pu_r_manifold/tau_0p8 \
+  --dataset-name manifold_orbit_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Manifold GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.90 \
+  --boundary-augmentation 10 \
+  --rotation-angles -45 -30 -15 0 15 30 45 \
+  --mu 0.5 \
+  --global-redundancy-weight 0.75 \
+  --manifold-k 7 \
+  --manifold-tau 0.8 \
+  --manifold-eigenvectors 8
+
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/FashionMNIST/hyperparameter_sensitivity/pu_r_manifold/tau_1p2 \
+  --dataset-name manifold_orbit_fashion_mnist \
+  $IMAGE_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --methods MaxLoss PU-R PU-R-Manifold GREATS \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.90 \
+  --boundary-augmentation 10 \
+  --rotation-angles -45 -30 -15 0 15 30 45 \
+  --mu 0.5 \
+  --global-redundancy-weight 0.75 \
+  --manifold-k 7 \
+  --manifold-tau 1.2 \
+  --manifold-eigenvectors 8
+```
+
 ## Time-Matched Literature Ablation
 
 This ablation tests the runtime concern directly. For each seed and noise level,
@@ -640,4 +859,43 @@ python -m pu_p2l.run_time_matched_noise \
   --n-train $N_IMAGE \
   --n-test $N_TEST \
   --max-total-support $SUPPORT_IMAGE
+```
+
+## Statistical Evidence Tables
+
+These commands turn finished `results.csv` files into paired statistical tables.
+They exclude `Marginal` by default and compare `PU-R` against the reportable
+literature baselines. Differences are computed as `PU-R - baseline` over paired
+seeds within the same dataset/noise/pretrain/ES condition. For lower-is-better
+metrics such as risk, bound, compression size, noise-hit rate, and runtime,
+negative differences favor `PU-R`.
+
+```bash
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/MNIST \
+  --results-dir results/PU-R/FashionMNIST/literature_pruning \
+  --results-dir results/PU-R/FashionMNIST/time_matched_literature \
+  --output-dir results/PU-R/statistical_evidence/core_reportable \
+  --target-method PU-R \
+  --baselines MaxLoss GREATS EL2N GraNdLast RHO-PretrainRef \
+  --metrics test_inappropriate_risk test_error certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate runtime_sec selection_runtime_sec
+```
+
+For extension-only evidence, run the same paired procedure with the extension
+method as the target and plain `PU-R` as the baseline:
+
+```bash
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/FashionMNIST/extensions/pu_r_vol \
+  --output-dir results/PU-R/statistical_evidence/extensions/pu_r_vol \
+  --target-method PU-R-Vol \
+  --baselines PU-R MaxLoss GREATS \
+  --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate mode_entropy spectral_entropy runtime_sec
+
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/FashionMNIST/extensions/pu_r_manifold \
+  --output-dir results/PU-R/statistical_evidence/extensions/pu_r_manifold \
+  --target-method PU-R-Manifold \
+  --baselines PU-R MaxLoss GREATS \
+  --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate mode_entropy spectral_entropy runtime_sec
 ```

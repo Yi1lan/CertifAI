@@ -71,6 +71,8 @@ SELECTION_DIAGNOSTIC_METRICS = [
     ("duplicate_hit_rate", "Duplicate-hit rate"),
     ("pairwise_feature_cosine", "Pairwise feature cosine"),
     ("strong_redundancy_hit_rate", "Strong redundancy-hit rate"),
+    ("group_revisit_rate", "Group revisit rate"),
+    ("unique_group_fraction", "Unique group fraction"),
     ("mean_selected_residual_novelty", "Mean selected residual novelty"),
     ("mode_entropy", "Mode/rotation entropy"),
 ]

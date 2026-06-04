@@ -42,11 +42,25 @@ def canonical_dataset_name(dataset_name: str) -> str:
     if name in {"volume_duplicate_fashion_mnist", "low_volume_fashion_mnist", "volume_duplicate_fmnist"}:
         return "volume_duplicate_fashion_mnist"
     if name in {
+        "volume_gap_fashion_mnist",
+        "volume_stress_fashion_mnist",
+        "low_volume_gap_fashion_mnist",
+        "volume_gap_fmnist",
+    }:
+        return "volume_gap_fashion_mnist"
+    if name in {
         "manifold_duplicate_fashion_mnist",
         "rotated_duplicate_fashion_mnist",
         "manifold_duplicate_fmnist",
     }:
         return "manifold_duplicate_fashion_mnist"
+    if name in {
+        "manifold_orbit_fashion_mnist",
+        "orbit_duplicate_fashion_mnist",
+        "augmentation_orbit_fashion_mnist",
+        "manifold_orbit_fmnist",
+    }:
+        return "manifold_orbit_fashion_mnist"
     if name in {"two_moons", "twomoons", "synthetic_two_moons"}:
         return "two_moons"
     if name in {"cifar", "cifar10", "cifar_10", "cifar10_reduced"}:
@@ -791,6 +805,80 @@ def make_volume_duplicate_fashion_mnist_dataset(
     )
 
 
+def make_volume_gap_fashion_mnist_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+    mode_imbalance: float,
+    boundary_augmentation: int = 1,
+) -> DatasetBundle:
+    x_train_all, y_train_labels, x_test_all, y_test_labels = _load_fashion_mnist_arrays(data_dir, download)
+    train_idx, mode_group_train = sample_mode_fashion_indices(
+        y_train_labels,
+        min(int(n_train), len(y_train_labels)),
+        mode_imbalance,
+        stable_seed(seed, "volume-gap-fashion-train"),
+    )
+    test_idx, _ = sample_mode_fashion_indices(
+        y_test_labels,
+        min(int(n_test), len(y_test_labels)),
+        0.5,
+        stable_seed(seed, "volume-gap-fashion-test"),
+    )
+    train_labels = y_train_labels[train_idx]
+    test_labels = y_test_labels[test_idx]
+    true_y_train = np.isin(train_labels, [6, 4]).astype(np.int64)
+    y_test = np.isin(test_labels, [6, 4]).astype(np.int64)
+
+    images = x_train_all[train_idx].copy()
+    group_id_train = np.arange(len(train_idx), dtype=np.int64)
+    is_duplicate_train = np.zeros(len(train_idx), dtype=bool)
+
+    boundary_augmentation = max(1, int(boundary_augmentation))
+    if boundary_augmentation > 1:
+        mode_a_positions = np.flatnonzero(mode_group_train == 0)
+        rng = np.random.default_rng(stable_seed(seed, "volume-gap-fashion-augmentation", boundary_augmentation))
+        group_base = len(train_idx)
+        group_offset = 0
+        for class_value in sorted(set(int(label) for label in true_y_train[mode_a_positions].tolist())):
+            class_positions = mode_a_positions[true_y_train[mode_a_positions] == class_value]
+            if not len(class_positions):
+                continue
+            bottleneck = max(1, int(boundary_augmentation) * 5)
+            source_count = max(1, int(np.ceil(len(class_positions) / bottleneck)))
+            source_positions = rng.choice(class_positions, size=source_count, replace=False)
+            source_choice = rng.integers(0, source_count, size=len(class_positions))
+            angles = rng.uniform(-2.0, 2.0, size=len(class_positions)).astype(np.float32)
+            images[class_positions] = rotate_images_uint8(
+                x_train_all[train_idx[source_positions[source_choice]]],
+                angles,
+            )
+            group_id_train[class_positions] = group_base + group_offset + source_choice
+            is_duplicate_train[class_positions] = True
+            group_offset += source_count
+
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train,
+        2,
+        noise_rate,
+        stable_seed(seed, "volume-gap-fashion-label-noise", int(noise_rate * 10_000)),
+    )
+
+    return DatasetBundle(
+        x_train=normalize_gray_images(images, 0.2860, 0.3530),
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=group_id_train,
+        is_duplicate_train=is_duplicate_train,
+        is_noisy_train=is_noisy_train,
+        x_test=normalize_gray_images(x_test_all[test_idx], 0.2860, 0.3530),
+        y_test=y_test,
+    )
+
+
 def make_manifold_duplicate_fashion_mnist_dataset(
     seed: int,
     n_train: int,
@@ -853,6 +941,87 @@ def make_manifold_duplicate_fashion_mnist_dataset(
     )
 
     group_id_train = mode_group_train * max(1, len(angles)) + train_angle_groups
+    return DatasetBundle(
+        x_train=normalize_gray_images(images, 0.2860, 0.3530),
+        y_train=y_train,
+        true_y_train=true_y_train,
+        group_id_train=group_id_train.astype(np.int64),
+        is_duplicate_train=is_duplicate_train,
+        is_noisy_train=is_noisy_train,
+        x_test=normalize_gray_images(rotate_images_uint8(x_test_all[test_idx], test_angles), 0.2860, 0.3530),
+        y_test=y_test,
+    )
+
+
+def make_manifold_orbit_fashion_mnist_dataset(
+    seed: int,
+    n_train: int,
+    n_test: int,
+    noise_rate: float,
+    data_dir: str,
+    download: bool,
+    mode_imbalance: float,
+    boundary_augmentation: int = 1,
+    rotation_angles: list[float] | None = None,
+) -> DatasetBundle:
+    x_train_all, y_train_labels, x_test_all, y_test_labels = _load_fashion_mnist_arrays(data_dir, download)
+    train_idx, mode_group_train = sample_mode_fashion_indices(
+        y_train_labels,
+        min(int(n_train), len(y_train_labels)),
+        mode_imbalance,
+        stable_seed(seed, "manifold-orbit-fashion-train"),
+    )
+    test_idx, _ = sample_mode_fashion_indices(
+        y_test_labels,
+        min(int(n_test), len(y_test_labels)),
+        0.5,
+        stable_seed(seed, "manifold-orbit-fashion-test"),
+    )
+    train_labels = y_train_labels[train_idx]
+    test_labels = y_test_labels[test_idx]
+    true_y_train = np.isin(train_labels, [6, 4]).astype(np.int64)
+    y_test = np.isin(test_labels, [6, 4]).astype(np.int64)
+
+    angles = rotation_angles or [-45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0]
+    rng = np.random.default_rng(stable_seed(seed, "manifold-orbit-fashion-augmentation", len(angles)))
+    train_angles, _ = fixed_rotation_angles(len(train_idx), angles, stable_seed(seed, "manifold-orbit-train-angles"))
+    test_angles, _ = fixed_rotation_angles(len(test_idx), angles, stable_seed(seed, "manifold-orbit-test-angles"))
+    images = rotate_images_uint8(x_train_all[train_idx], train_angles)
+    group_id_train = np.arange(len(train_idx), dtype=np.int64)
+    is_duplicate_train = np.zeros(len(train_idx), dtype=bool)
+
+    boundary_augmentation = max(1, int(boundary_augmentation))
+    if boundary_augmentation > 1:
+        mode_a_positions = np.flatnonzero(mode_group_train == 0)
+        group_base = len(train_idx)
+        group_offset = 0
+        angle_cycle = np.asarray(angles, dtype=np.float32)
+        for class_value in sorted(set(int(label) for label in true_y_train[mode_a_positions].tolist())):
+            class_positions = mode_a_positions[true_y_train[mode_a_positions] == class_value]
+            if not len(class_positions):
+                continue
+            orbit_width = max(1, len(angle_cycle))
+            source_count = max(1, int(np.ceil(len(class_positions) / (boundary_augmentation * orbit_width))))
+            source_positions = rng.choice(class_positions, size=source_count, replace=False)
+            source_choice = rng.integers(0, source_count, size=len(class_positions))
+            angle_groups = np.arange(len(class_positions), dtype=np.int64) % orbit_width
+            angle_groups = rng.permutation(angle_groups)
+            orbit_angles = angle_cycle[angle_groups]
+            images[class_positions] = rotate_images_uint8(
+                x_train_all[train_idx[source_positions[source_choice]]],
+                orbit_angles,
+            )
+            group_id_train[class_positions] = group_base + group_offset + source_choice
+            is_duplicate_train[class_positions] = True
+            group_offset += source_count
+
+    y_train, is_noisy_train = apply_label_noise(
+        true_y_train,
+        2,
+        noise_rate,
+        stable_seed(seed, "manifold-orbit-fashion-label-noise", int(noise_rate * 10_000)),
+    )
+
     return DatasetBundle(
         x_train=normalize_gray_images(images, 0.2860, 0.3530),
         y_train=y_train,
@@ -1034,8 +1203,31 @@ def make_experiment_dataset(
             mode_imbalance,
             boundary_augmentation=boundary_augmentation,
         )
+    if name == "volume_gap_fashion_mnist":
+        return make_volume_gap_fashion_mnist_dataset(
+            seed,
+            n_train,
+            n_test,
+            noise_rate,
+            data_dir,
+            download,
+            mode_imbalance,
+            boundary_augmentation=boundary_augmentation,
+        )
     if name == "manifold_duplicate_fashion_mnist":
         return make_manifold_duplicate_fashion_mnist_dataset(
+            seed,
+            n_train,
+            n_test,
+            noise_rate,
+            data_dir,
+            download,
+            mode_imbalance,
+            boundary_augmentation=boundary_augmentation,
+            rotation_angles=rotation_angles,
+        )
+    if name == "manifold_orbit_fashion_mnist":
+        return make_manifold_orbit_fashion_mnist_dataset(
             seed,
             n_train,
             n_test,
@@ -1054,7 +1246,8 @@ def make_experiment_dataset(
         "Unknown dataset "
         f"'{dataset_name}'. Valid datasets: synthetic_redundancy_hard, mnist, mnist10, fashion_mnist, "
         "mode_mnist, boundary_duplicate_mnist, boundary_duplicate_fashion_mnist, "
-        "volume_duplicate_fashion_mnist, manifold_duplicate_fashion_mnist, rotated_mnist, "
+        "volume_duplicate_fashion_mnist, volume_gap_fashion_mnist, "
+        "manifold_duplicate_fashion_mnist, manifold_orbit_fashion_mnist, rotated_mnist, "
         "rotated_fashion_mnist, two_moons, cifar10."
     )
 

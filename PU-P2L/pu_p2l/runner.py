@@ -643,6 +643,9 @@ def run_p2l_trace(
                     "local_redundancy_hit_rate": None,
                     "residual_redundancy_hit_rate": None,
                     "strong_redundancy_hit_rate": None,
+                    "group_revisit_rate": None,
+                    "unique_group_fraction": None,
+                    "max_group_selection_fraction": None,
                     "mode_entropy": None,
                     "minority_mode_fraction": None,
                     "spectral_entropy": None,
@@ -1093,6 +1096,9 @@ def selected_set_diagnostics(
             "local_redundancy_hit_rate": 0.0,
             "residual_redundancy_hit_rate": 0.0,
             "strong_redundancy_hit_rate": 0.0,
+            "group_revisit_rate": 0.0,
+            "unique_group_fraction": 0.0,
+            "max_group_selection_fraction": 0.0,
             "mode_entropy": 0.0,
             "minority_mode_fraction": 0.0,
             "spectral_entropy": 0.0,
@@ -1143,9 +1149,15 @@ def selected_set_diagnostics(
         probs = counts.astype(np.float64) / np.sum(counts)
         mode_entropy = float(-np.sum(probs * np.log(np.maximum(probs, 1e-12))) / max(np.log(len(probs)), 1e-12))
         minority_mode_fraction = float(np.min(probs))
+        group_revisit_rate = float(np.sum(np.maximum(counts - 1, 0)) / max(len(valid_groups), 1))
+        unique_group_fraction = float(len(counts) / max(len(valid_groups), 1))
+        max_group_selection_fraction = float(np.max(counts) / max(len(valid_groups), 1))
     else:
         mode_entropy = 0.0
         minority_mode_fraction = 0.0
+        group_revisit_rate = 0.0
+        unique_group_fraction = 0.0
+        max_group_selection_fraction = 0.0
 
     spectral_entropy = normalized_spectral_entropy(stats.embeddings, score_config.residual_tol)
     dynamic_mu = score_config.mu * (1.0 + max(float(score_config.alpha), 0.0) * (1.0 - spectral_entropy))
@@ -1159,6 +1171,9 @@ def selected_set_diagnostics(
         "local_redundancy_hit_rate": float(np.mean(local_hits)) if local_hits else 0.0,
         "residual_redundancy_hit_rate": float(np.mean(residual_hits)) if residual_hits else 0.0,
         "strong_redundancy_hit_rate": float(np.mean(strong_hits)) if strong_hits else 0.0,
+        "group_revisit_rate": group_revisit_rate,
+        "unique_group_fraction": unique_group_fraction,
+        "max_group_selection_fraction": max_group_selection_fraction,
         "mode_entropy": mode_entropy,
         "minority_mode_fraction": minority_mode_fraction,
         "spectral_entropy": spectral_entropy,
