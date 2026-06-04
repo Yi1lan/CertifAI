@@ -16,6 +16,7 @@ RESULT_FIELDS = [
     "seed",
     "noise_rate",
     "pretrain_fraction",
+    "pretrain_training_mode",
     "n_cert",
     "n_pretrain",
     "compression_size",

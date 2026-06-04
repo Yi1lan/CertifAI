@@ -101,7 +101,7 @@ def main() -> None:
     write_summary_views(
         output_dir,
         rows,
-        group_fields=["dataset", "method", "noise_rate"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_training_mode"],
         numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
     if not args.no_plots:

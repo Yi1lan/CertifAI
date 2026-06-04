@@ -27,6 +27,7 @@ TIME_MATCHED_FIELDS = [
     "seed",
     "noise_rate",
     "pretrain_fraction",
+    "pretrain_training_mode",
     "reference_method",
     "reference_es_budget",
     "es_budget",
@@ -209,7 +210,15 @@ def main() -> None:
     write_summary_views(
         output_dir,
         rows,
-        group_fields=["dataset", "reference_method", "reference_es_budget", "method", "noise_rate", "pretrain_fraction"],
+        group_fields=[
+            "dataset",
+            "reference_method",
+            "reference_es_budget",
+            "method",
+            "noise_rate",
+            "pretrain_fraction",
+            "pretrain_training_mode",
+        ],
         numeric_fields=[
             "step",
             "target_step",

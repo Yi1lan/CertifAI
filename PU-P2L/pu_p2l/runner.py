@@ -89,6 +89,7 @@ class RunConfig:
     inference_batch_size: int
     pretrain_epochs: int
     pretrain_lr: float
+    pretrain_training_mode: str
     p2l_epochs_per_iter: int
     p2l_lr: float
     optimizer: str
@@ -159,6 +160,37 @@ def make_run_model(seed: int, split: SplitBundle, config: RunConfig, device: tor
         hidden_dim=config.hidden_dim,
         dropout_prob=config.dropout_prob,
         device=device,
+    )
+
+
+def use_pretrain_warm_start(config: RunConfig) -> bool:
+    return config.pretrain_training_mode in {"warm_start", "warm_start_and_support"}
+
+
+def include_pretrain_in_p2l_training(config: RunConfig) -> bool:
+    return config.pretrain_training_mode in {"support", "warm_start_and_support"}
+
+
+def p2l_training_data(
+    split: SplitBundle,
+    support: list[int],
+    config: RunConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    support_arr = np.asarray(support, dtype=np.int64)
+    if len(support_arr):
+        x_support = split.pool.x[support_arr]
+        y_support = split.pool.y[support_arr]
+    else:
+        x_support = np.empty((0, *split.pool.x.shape[1:]), dtype=split.pool.x.dtype)
+        y_support = np.empty((0,), dtype=split.pool.y.dtype)
+
+    if not include_pretrain_in_p2l_training(config) or len(split.y_pretrain) == 0:
+        return x_support, y_support
+    if len(y_support) == 0:
+        return split.x_pretrain, split.y_pretrain
+    return (
+        np.concatenate([split.x_pretrain, x_support], axis=0),
+        np.concatenate([split.y_pretrain, y_support], axis=0),
     )
 
 
@@ -338,7 +370,7 @@ def run_p2l_method(
         stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
     )
 
-    if len(split.y_pretrain):
+    if use_pretrain_warm_start(config) and len(split.y_pretrain):
         train_model(
             model,
             split.x_pretrain,
@@ -369,12 +401,12 @@ def run_p2l_method(
         probe_y = np.empty((0,), dtype=np.int64)
 
     while True:
-        if support:
-            support_arr = np.asarray(support, dtype=np.int64)
+        train_x, train_y = p2l_training_data(split, support, config)
+        if len(train_y):
             train_model(
                 model,
-                split.pool.x[support_arr],
-                split.pool.y[support_arr],
+                train_x,
+                train_y,
                 epochs=config.p2l_epochs_per_iter,
                 lr=config.p2l_lr,
                 batch_size=config.batch_size,
@@ -444,6 +476,7 @@ def run_p2l_method(
         "seed": seed,
         "noise_rate": noise_rate,
         "pretrain_fraction": pretrain_fraction,
+        "pretrain_training_mode": config.pretrain_training_mode,
         "n_cert": len(split.pool.y),
         "n_pretrain": len(split.y_pretrain),
         "compression_size": compression_size,
@@ -479,7 +512,7 @@ def run_p2l_trace(
         stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
     )
 
-    if len(split.y_pretrain):
+    if use_pretrain_warm_start(config) and len(split.y_pretrain):
         train_model(
             model,
             split.x_pretrain,
@@ -514,14 +547,14 @@ def run_p2l_trace(
 
     while True:
         step = max(0, len(support) - initial_support_size)
-        should_train = bool(support) and (step == 0 or step % train_every == 0)
+        train_x, train_y = p2l_training_data(split, support, config)
+        should_train = bool(len(train_y)) and (step == 0 or step % train_every == 0)
         trained_this_step = False
         if should_train:
-            support_arr = np.asarray(support, dtype=np.int64)
             train_model(
                 model,
-                split.pool.x[support_arr],
-                split.pool.y[support_arr],
+                train_x,
+                train_y,
                 epochs=config.p2l_epochs_per_iter,
                 lr=config.p2l_lr,
                 batch_size=config.batch_size,
@@ -549,12 +582,11 @@ def run_p2l_trace(
             bad_local = np.flatnonzero(losses > config.gamma)
             remaining_bad = int(len(bad_local))
             stop_reached = remaining_bad == 0
-            if stop_reached and not trained_this_step and support:
-                support_arr = np.asarray(support, dtype=np.int64)
+            if stop_reached and not trained_this_step and len(train_y):
                 train_model(
                     model,
-                    split.pool.x[support_arr],
-                    split.pool.y[support_arr],
+                    train_x,
+                    train_y,
                     epochs=config.p2l_epochs_per_iter,
                     lr=config.p2l_lr,
                     batch_size=config.batch_size,
@@ -638,6 +670,7 @@ def run_p2l_trace(
                     "seed": seed,
                     "noise_rate": noise_rate,
                     "pretrain_fraction": pretrain_fraction,
+                    "pretrain_training_mode": config.pretrain_training_mode,
                     "step": step,
                     "n_cert": len(split.pool.y),
                     "n_pretrain": len(split.y_pretrain),
@@ -700,7 +733,7 @@ def run_p2l_es_budgets(
         stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
     )
 
-    if len(split.y_pretrain):
+    if use_pretrain_warm_start(config) and len(split.y_pretrain):
         train_model(
             model,
             split.x_pretrain,
@@ -760,6 +793,7 @@ def run_p2l_es_budgets(
                 "seed": seed,
                 "noise_rate": noise_rate,
                 "pretrain_fraction": pretrain_fraction,
+                "pretrain_training_mode": config.pretrain_training_mode,
                 "es_budget": budget,
                 "step": step,
                 "n_cert": len(split.pool.y),
@@ -781,12 +815,12 @@ def run_p2l_es_budgets(
         recorded.add(budget)
 
     while True:
-        if support:
-            support_arr = np.asarray(support, dtype=np.int64)
+        train_x, train_y = p2l_training_data(split, support, config)
+        if len(train_y):
             train_model(
                 model,
-                split.pool.x[support_arr],
-                split.pool.y[support_arr],
+                train_x,
+                train_y,
                 epochs=config.p2l_epochs_per_iter,
                 lr=config.p2l_lr,
                 batch_size=config.batch_size,
@@ -873,7 +907,7 @@ def run_p2l_time_budget(
         stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
     )
 
-    if len(split.y_pretrain):
+    if use_pretrain_warm_start(config) and len(split.y_pretrain):
         train_model(
             model,
             split.x_pretrain,
@@ -916,12 +950,12 @@ def run_p2l_time_budget(
     remaining_bad = len(split.pool.y)
 
     while True:
-        if support:
-            support_arr = np.asarray(support, dtype=np.int64)
+        train_x, train_y = p2l_training_data(split, support, config)
+        if len(train_y):
             train_model(
                 model,
-                split.pool.x[support_arr],
-                split.pool.y[support_arr],
+                train_x,
+                train_y,
                 epochs=config.p2l_epochs_per_iter,
                 lr=config.p2l_lr,
                 batch_size=config.batch_size,
@@ -1010,6 +1044,7 @@ def run_p2l_time_budget(
         "seed": seed,
         "noise_rate": noise_rate,
         "pretrain_fraction": pretrain_fraction,
+        "pretrain_training_mode": config.pretrain_training_mode,
         "reference_method": reference_method,
         "reference_es_budget": reference_es_budget,
         "es_budget": reference_es_budget,

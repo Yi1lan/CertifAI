@@ -91,6 +91,19 @@ def add_pac_bayes_args(parser: argparse.ArgumentParser, default_samples: int) ->
 
 
 def add_score_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--pretrain-training-mode",
+        type=str,
+        default="warm_start",
+        choices=["warm_start", "support", "warm_start_and_support"],
+        help=(
+            "How pretrain data is used by P2L. 'warm_start' preserves the current PU-P2L behavior: "
+            "train once on pretrain data, then iterate using selected certification support only. "
+            "'support' matches the original P2L role: pretrain data is included in every iterative "
+            "P2L training update but is not charged in the compression size. "
+            "'warm_start_and_support' does both."
+        ),
+    )
     parser.add_argument("--c-loss", type=float, default=3.0)
     parser.add_argument(
         "--alpha",
@@ -147,6 +160,7 @@ def build_config(args: argparse.Namespace) -> RunConfig:
         inference_batch_size=args.inference_batch_size,
         pretrain_epochs=args.pretrain_epochs,
         pretrain_lr=args.pretrain_lr,
+        pretrain_training_mode=getattr(args, "pretrain_training_mode", "warm_start"),
         p2l_epochs_per_iter=args.p2l_epochs_per_iter,
         p2l_lr=args.p2l_lr,
         optimizer=args.optimizer,
@@ -240,7 +254,7 @@ def main() -> None:
     write_summary_views(
         output_dir,
         rows,
-        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "pretrain_training_mode"],
         numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
     if not args.no_plots:

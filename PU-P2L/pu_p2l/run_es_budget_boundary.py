@@ -27,6 +27,7 @@ ES_BUDGET_FIELDS = [
     "seed",
     "noise_rate",
     "pretrain_fraction",
+    "pretrain_training_mode",
     "es_budget",
     "step",
     "n_cert",
@@ -159,7 +160,7 @@ def main() -> None:
     write_summary_views(
         output_dir,
         rows,
-        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "es_budget"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "pretrain_training_mode", "es_budget"],
         numeric_fields=["step", *SUMMARY_NUMERIC_FIELDS],
     )
     if not args.no_plots:

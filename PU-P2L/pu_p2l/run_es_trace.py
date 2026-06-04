@@ -27,6 +27,7 @@ TRACE_FIELDS = [
     "seed",
     "noise_rate",
     "pretrain_fraction",
+    "pretrain_training_mode",
     "step",
     "n_cert",
     "n_pretrain",
@@ -201,7 +202,7 @@ def main() -> None:
     write_summary_views(
         output_dir,
         rows,
-        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "step"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "pretrain_training_mode", "step"],
         numeric_fields=SUMMARY_NUMERIC_FIELDS,
     )
     if not args.no_plots:

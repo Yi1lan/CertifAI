@@ -25,9 +25,11 @@ from .runner import (
     make_run_model,
     pac_bayes_parameter_names,
     pac_bayes_stats,
+    p2l_training_data,
     parameter_vector,
     selected_set_diagnostics,
     set_all_seeds,
+    use_pretrain_warm_start,
 )
 
 try:
@@ -42,6 +44,7 @@ GENERALIZATION_FIELDS = [
     "seed",
     "noise_rate",
     "pretrain_fraction",
+    "pretrain_training_mode",
     "n_cert",
     "n_pretrain",
     "compression_size",
@@ -347,7 +350,7 @@ def run_generalization_method(
         stable_seed(seed, f"{method}-model", int(pretrain_fraction * 10_000)), split, config, device
     )
 
-    if len(split.y_pretrain):
+    if use_pretrain_warm_start(config) and len(split.y_pretrain):
         train_model(
             model,
             split.x_pretrain,
@@ -380,12 +383,12 @@ def run_generalization_method(
         probe_y = np.empty((0,), dtype=np.int64)
 
     while True:
-        if support:
-            support_arr = np.asarray(support, dtype=np.int64)
+        train_x, train_y = p2l_training_data(split, support, config)
+        if len(train_y):
             train_model(
                 model,
-                split.pool.x[support_arr],
-                split.pool.y[support_arr],
+                train_x,
+                train_y,
                 epochs=config.p2l_epochs_per_iter,
                 lr=config.p2l_lr,
                 batch_size=config.batch_size,
@@ -467,6 +470,7 @@ def run_generalization_method(
         "seed": seed,
         "noise_rate": noise_rate,
         "pretrain_fraction": pretrain_fraction,
+        "pretrain_training_mode": config.pretrain_training_mode,
         "n_cert": len(split.pool.y),
         "n_pretrain": len(split.y_pretrain),
         "compression_size": compression_size,
@@ -519,12 +523,12 @@ def main() -> None:
     numeric_fields = [
         field
         for field in GENERALIZATION_FIELDS
-        if field not in {"method", "dataset", "seed", "noise_rate", "pretrain_fraction"}
+        if field not in {"method", "dataset", "seed", "noise_rate", "pretrain_fraction", "pretrain_training_mode"}
     ]
     write_summary_views(
         output_dir,
         rows,
-        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction"],
+        group_fields=["dataset", "method", "noise_rate", "pretrain_fraction", "pretrain_training_mode"],
         numeric_fields=numeric_fields,
     )
     if not args.no_plots:

@@ -15,6 +15,29 @@ MNIST-style redundant boundary dataset. The setting `--boundary-augmentation 5`
 injects repeated boundary-like samples so the selector can be tested against
 redundant high-loss candidates.
 
+## Pretrain Semantics
+
+The original P2L code treats the pretrain fraction as the initial support set:
+those points remain in the training set during every P2L iteration, but the P2L
+certificate charges only the newly picked certification points. To make this
+choice explicit, all experiment entry points support:
+
+- `--pretrain-training-mode warm_start`: current PU-P2L behavior used by the
+  existing result folders. The model is trained once on the pretrain split, then
+  each P2L iteration trains only on selected certification support.
+- `--pretrain-training-mode support`: original P2L-aligned behavior. The
+  pretrain split is included in every iterative P2L training update and is not
+  counted in the compression size. There is no separate one-shot warm start in
+  this mode, so `--p2l-epochs-per-iter` controls the training applied to
+  pretrain-plus-support during the P2L loop.
+- `--pretrain-training-mode warm_start_and_support`: diagnostic ablation. The
+  model is first warm-started on pretrain data and then the same pretrain data is
+  also included in every P2L update.
+
+For the MNIST runs below, use `support` when comparing the bound-vs-pretrain
+shape against the original P2L experiments. Use `warm_start` only to reproduce
+the previous PU-P2L result directories.
+
 ## Setup
 
 ```bash
@@ -30,8 +53,9 @@ export N_IMAGE=5000
 export N_TEST=10000
 export SUPPORT_MNIST=800
 export SUPPORT_IMAGE=1000
+export PRETRAIN_TRAINING_MODE=support
 
-export MNIST_COMMON="--data-dir $DATA_DIR --download-data --device $DEVICE --model-name mnist_fcn --optimizer sgd --momentum 0.95 --batch-size 60000 --inference-batch-size 1024 --pretrain-epochs 20 --p2l-epochs-per-iter 5 --pretrain-lr 0.01 --p2l-lr 0.01 --dropout-prob 0.2 --initial-per-class 2 --mu 1.0 --global-redundancy-weight 1.0 --residual-rank 0 --residual-tol 1e-6 --pac-bayes-samples 0"
+export MNIST_COMMON="--data-dir $DATA_DIR --download-data --device $DEVICE --model-name mnist_fcn --optimizer sgd --momentum 0.95 --batch-size 60000 --inference-batch-size 1024 --pretrain-training-mode $PRETRAIN_TRAINING_MODE --pretrain-epochs 20 --p2l-epochs-per-iter 5 --pretrain-lr 0.01 --p2l-lr 0.01 --dropout-prob 0.2 --initial-per-class 2 --mu 1.0 --global-redundancy-weight 1.0 --residual-rank 0 --residual-tol 1e-6 --pac-bayes-samples 0"
 export IMAGE_COMMON="$MNIST_COMMON"
 
 export CORE_METHODS="MaxLoss Marginal PU-R GREATS"
