@@ -114,6 +114,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baselines", type=str, nargs="+", default=DEFAULT_BASELINES)
     parser.add_argument("--metrics", type=str, nargs="+", default=DEFAULT_METRICS)
     parser.add_argument("--condition-fields", type=str, nargs="+", default=DEFAULT_CONDITION_FIELDS)
+    parser.add_argument(
+        "--row-filter",
+        type=str,
+        action="append",
+        default=[],
+        help=(
+            "Keep only rows matching field=value[,value...] before pairing. "
+            "May be passed more than once, e.g. --row-filter pretrain_fraction=0.0 "
+            "--row-filter es_budget=100,200."
+        ),
+    )
     parser.add_argument("--include-step", action="store_true", help="Also pair by step for ES trace CSVs.")
     parser.add_argument("--include-marginal", action="store_true")
     parser.add_argument("--min-pairs", type=int, default=2)
@@ -127,6 +138,43 @@ def to_float(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return math.nan
+
+
+def parse_row_filters(filters: list[str]) -> dict[str, list[str]]:
+    parsed: dict[str, list[str]] = {}
+    for item in filters:
+        if "=" not in item:
+            raise ValueError(f"Invalid --row-filter {item!r}; expected field=value[,value...].")
+        field, raw_values = item.split("=", 1)
+        field = field.strip()
+        values = [value.strip() for value in raw_values.split(",") if value.strip()]
+        if not field or not values:
+            raise ValueError(f"Invalid --row-filter {item!r}; expected field=value[,value...].")
+        parsed.setdefault(field, []).extend(values)
+    return parsed
+
+
+def values_match(row_value: Any, allowed_values: list[str]) -> bool:
+    row_text = "" if row_value is None else str(row_value)
+    row_float = to_float(row_text)
+    for allowed in allowed_values:
+        allowed_float = to_float(allowed)
+        if not math.isnan(row_float) and not math.isnan(allowed_float):
+            if abs(row_float - allowed_float) <= 1e-12:
+                return True
+        elif row_text == allowed:
+            return True
+    return False
+
+
+def filter_rows(rows: list[dict[str, str]], filters: dict[str, list[str]]) -> list[dict[str, str]]:
+    if not filters:
+        return rows
+    return [
+        row
+        for row in rows
+        if all(values_match(row.get(field, ""), allowed_values) for field, allowed_values in filters.items())
+    ]
 
 
 def discover_result_paths(results_dirs: list[str], results: list[str]) -> list[Path]:
@@ -423,6 +471,7 @@ def main() -> None:
     result_paths = discover_result_paths(args.results_dir, args.results)
     if not result_paths:
         raise FileNotFoundError("No results.csv files found. Pass --results-dir or --results.")
+    row_filters = parse_row_filters(args.row_filter)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -430,7 +479,7 @@ def main() -> None:
     by_condition_rows: list[dict[str, Any]] = []
     overall_rows: list[dict[str, Any]] = []
     for path in result_paths:
-        rows = read_csv(path)
+        rows = filter_rows(read_csv(path), row_filters)
         if not rows:
             continue
         condition_fields = infer_condition_fields(rows, args.condition_fields, args.include_step)

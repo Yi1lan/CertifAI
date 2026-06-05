@@ -701,6 +701,35 @@ python -m pu_p2l.run_statistical_evidence \
   --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate group_revisit_rate unique_group_fraction mode_entropy spectral_entropy runtime_sec
 ```
 
+The pooled extension evidence above is intentionally broad. Because the two
+extensions are mechanism-specific, also generate focused reports from the same
+CSV files before drawing conclusions:
+
+- `PU-R-Vol` should be read as a cold-start low-volume-source extension, so the
+  focused report keeps only `pretrain_fraction=0.0`.
+- `PU-R-Manifold` needs enough support points to build a meaningful graph, so
+  the focused report keeps only `pretrain_fraction=0.0` and ES budgets `100`
+  and `200`.
+
+```bash
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/FashionMNIST/extensions_v4/pu_r_vol \
+  --output-dir results/PU-R/statistical_evidence/extensions_v4_focus/pu_r_vol_cold_start \
+  --target-method PU-R-Vol \
+  --baselines PU-R MaxLoss GREATS \
+  --row-filter pretrain_fraction=0.0 \
+  --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate group_revisit_rate unique_group_fraction mode_entropy spectral_entropy runtime_sec
+
+python -m pu_p2l.run_statistical_evidence \
+  --results-dir results/PU-R/FashionMNIST/extensions_v4/pu_r_manifold \
+  --output-dir results/PU-R/statistical_evidence/extensions_v4_focus/pu_r_manifold_graph_ready \
+  --target-method PU-R-Manifold \
+  --baselines PU-R MaxLoss GREATS \
+  --row-filter pretrain_fraction=0.0 \
+  --row-filter es_budget=100,200 \
+  --metrics test_inappropriate_risk certified_bound effective_compression_size noise_hit_rate duplicate_hit_rate group_revisit_rate unique_group_fraction mode_entropy spectral_entropy runtime_sec
+```
+
 ## Extension Hyperparameter Sensitivity
 
 Run these only after the source-orbit validation runs. They are designed to show
@@ -874,6 +903,134 @@ python -m pu_p2l.run_time_matched_noise \
   --n-train $N_IMAGE \
   --n-test $N_TEST \
   --max-total-support $SUPPORT_IMAGE
+```
+
+## PU-R Hyperparameter and Selection Ablations
+
+These ablations are intended for the evaluation chapter rather than the main
+core-result table. They answer two different questions:
+
+- Hyperparameter sensitivity: whether PU-R depends on a single tuned setting of
+  residual-novelty weight, redundancy weight, or residual rank.
+- Selection visualisation: whether the selected points are visibly different
+  across MaxLoss, GREATS, and PU-R under noisy redundant high-dimensional data.
+
+The commands below use three seeds by default to keep the ablation practical.
+If the curves are used as final report evidence, rerun with `--seeds $SEEDS5`.
+
+### PU-R Hyperparameter Sensitivity, Fashion-MNIST Noise=0.3
+
+This command performs one-factor sweeps around the default PU-R setting on
+noisy Fashion-MNIST. It produces `results.csv`, summary tables, and plots for
+risk, P2L-ES bound, effective compression size, noise-hit rate, duplicate-hit
+rate, pairwise feature cosine, and residual novelty versus each hyperparameter.
+
+```bash
+python -m pu_p2l.run_pu_r_hyperparameter_ablation \
+  --output-dir results/PU-R/FashionMNIST/ablations/pu_r_hyperparameters/noise_0p3 \
+  --dataset-name fashion_mnist \
+  $IMAGE_COMMON \
+  --pretrain-training-mode support \
+  --seeds 0 1 2 \
+  --noise-rates 0.3 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mu 1.0 \
+  --global-redundancy-weight 1.0 \
+  --residual-rank 0 \
+  --mu-values 0.0 0.25 0.5 1.0 1.5 \
+  --redundancy-weight-values 0.0 0.5 1.0 1.5 2.0 \
+  --residual-rank-values 0 32 64 128
+```
+
+### PU-R Hyperparameter Sensitivity, Redundant Fashion-MNIST Noise=0.3
+
+This is the same one-factor sweep, but on the redundant boundary dataset. It is
+the stronger diagnostic for whether the redundancy term is doing useful work.
+
+```bash
+python -m pu_p2l.run_pu_r_hyperparameter_ablation \
+  --output-dir results/PU-R/FashionMNIST/ablations/pu_r_hyperparameters/boundary_duplicate_noise_0p3_aug5 \
+  --dataset-name boundary_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --pretrain-training-mode support \
+  --seeds 0 1 2 \
+  --noise-rates 0.3 \
+  --pretrain-fractions 0.3 \
+  --es-budgets 50 100 200 \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5 \
+  --mu 1.0 \
+  --global-redundancy-weight 1.0 \
+  --residual-rank 0 \
+  --mu-values 0.0 0.25 0.5 1.0 1.5 \
+  --redundancy-weight-values 0.0 0.5 1.0 1.5 2.0 \
+  --residual-rank-values 0 32 64 128
+```
+
+### Selection Visualisation, PCA Projection
+
+This command records the selected support points at ES budgets 50, 100, and
+200, then overlays MaxLoss, GREATS, and PU-R selections on a shared PCA
+projection of the certification pool. It writes:
+
+- `pool_projection.csv`: all projected pool points.
+- `selected_points.csv`: selected support points, selected order, noisy flag,
+  duplicate flag, and group ID.
+- `results.csv`: budget-level selection diagnostics.
+- `plots/selection_projection_*.png`: one figure per budget.
+
+```bash
+python -m pu_p2l.run_selection_visualization \
+  --output-dir results/PU-R/FashionMNIST/ablations/selection_visualization/boundary_duplicate_noise_0p3_aug5_pca \
+  --dataset-name boundary_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --pretrain-training-mode support \
+  --seeds 0 \
+  --noise-rates 0.3 \
+  --pretrain-fractions 0.3 \
+  --methods MaxLoss GREATS PU-R \
+  --budgets 50 100 200 \
+  --projection pca \
+  --projection-source raw \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5
+```
+
+### Selection Visualisation, t-SNE Projection
+
+Use this only if the PCA plot is too linear to show the cluster/source-orbit
+structure. It requires `scikit-learn` in the conda environment and is slower
+than PCA.
+
+```bash
+python -m pu_p2l.run_selection_visualization \
+  --output-dir results/PU-R/FashionMNIST/ablations/selection_visualization/boundary_duplicate_noise_0p3_aug5_tsne \
+  --dataset-name boundary_duplicate_fashion_mnist \
+  $IMAGE_COMMON \
+  --pretrain-training-mode support \
+  --seeds 0 \
+  --noise-rates 0.3 \
+  --pretrain-fractions 0.3 \
+  --methods MaxLoss GREATS PU-R \
+  --budgets 50 100 200 \
+  --projection tsne \
+  --projection-source raw \
+  --tsne-perplexity 30 \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5
 ```
 
 ## Statistical Evidence Tables
