@@ -47,6 +47,7 @@ export PYTHONPATH=PU-P2L
 export DEVICE=cuda
 export DATA_DIR=data
 export SEEDS5="0 1 2 3 4"
+export SEEDS10="0 1 2 3 4 5 6 7 8 9"
 
 export N_MNIST=5000
 export N_IMAGE=5000
@@ -1031,6 +1032,51 @@ python -m pu_p2l.run_selection_visualization \
   --max-total-support $SUPPORT_IMAGE \
   --mode-imbalance 0.85 \
   --boundary-augmentation 5
+```
+
+### Multi-Seed Selection Report for Source-Orbit Redundancy
+
+The single-seed projection above is only a qualitative diagnostic. For the
+evaluation text, use this multi-seed source-orbit report instead: it produces
+mean and standard deviation tables for noise-hit, duplicate-hit, pairwise
+feature cosine, group-revisit rate, effective compression size, and P2L-ES
+bound. It also writes representative PU-R and PU-R-Manifold plots selected by
+the best target-method noise-hit rate at budget 100.
+
+```bash
+python -m pu_p2l.run_selection_visualization \
+  --output-dir results/PU-R/FashionMNIST/ablations/selection_visualization/manifold_group_noise_0p1_aug12_embedding_pca_multiseed \
+  --dataset-name manifold_group_noise_fashion_mnist \
+  $IMAGE_COMMON \
+  --pretrain-training-mode support \
+  --seeds $SEEDS10 \
+  --noise-rates 0.1 \
+  --pretrain-fractions 0.0 \
+  --methods MaxLoss GREATS PU-R PU-R-Manifold \
+  --budgets 50 100 200 \
+  --projection pca \
+  --projection-source embedding \
+  --n-train $N_IMAGE \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_IMAGE \
+  --mode-imbalance 0.90 \
+  --boundary-augmentation 12 \
+  --rotation-angles -45 -30 -15 0 15 30 45 \
+  --mu 0.45 \
+  --global-redundancy-weight 1.1 \
+  --manifold-k 7 \
+  --manifold-tau 0.5 \
+  --manifold-eigenvectors 8 \
+  --no-plots
+
+python -m pu_p2l.run_selection_report \
+  --input-dir results/PU-R/FashionMNIST/ablations/selection_visualization/manifold_group_noise_0p1_aug12_embedding_pca_multiseed \
+  --output-dir results/PU-R/FashionMNIST/ablations/selection_visualization/manifold_group_noise_0p1_aug12_embedding_pca_multiseed/report \
+  --methods MaxLoss GREATS PU-R PU-R-Manifold \
+  --target-methods PU-R PU-R-Manifold \
+  --example-budget 100 \
+  --best-metric noise_hit_rate \
+  --best-direction min
 ```
 
 ## Statistical Evidence Tables

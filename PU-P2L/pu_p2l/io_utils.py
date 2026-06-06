@@ -141,11 +141,13 @@ def summarize(rows: list[dict[str, Any]], group_fields: list[str], numeric_field
             if values:
                 arr = np.asarray(values, dtype=np.float64)
                 out[f"{field}_mean"] = float(np.mean(arr))
+                out[f"{field}_std"] = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
                 out[f"{field}_se"] = (
                     float(np.std(arr, ddof=1) / math.sqrt(len(arr))) if len(arr) > 1 else 0.0
                 )
             else:
                 out[f"{field}_mean"] = ""
+                out[f"{field}_std"] = ""
                 out[f"{field}_se"] = ""
         output.append(out)
     return output
