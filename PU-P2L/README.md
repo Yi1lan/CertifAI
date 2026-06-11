@@ -1,214 +1,140 @@
-# PU-P2L Experiments
+# PU-P2L Package
 
-This folder is the cleaned implementation for the PU-P2L experiments. The
-older `certifai_experiments/` folder is kept as a lab/reference area.
+`PU-P2L` is the cleaned experiment package for the CertifAI PU-R study. It implements deterministic P2L/P2L-ES acquisition loops, PU-R scoring, comparison selectors, dataset perturbations, diagnostics, plotting, and statistical evidence utilities.
 
-The main runbook is [`experiment_commands.md`](experiment_commands.md). It uses
-one training run per experiment. If `Marginal` is included in `--methods`, the
-runner still trains only once and then emits both reporting views:
-
-```text
-results/experiments/pu_r/<experiment>/
-  results.csv
-  summary.csv
-  summary_with_marginal.csv
-  summary_without_marginal.csv
-  tables/
-    with_marginal.csv
-    without_marginal.csv
-  plots/
-    with_marginal/
-    without_marginal/
-```
-
-This avoids rerunning the same setting only to remove `Marginal` from a plot or
-table.
-
-## Conda Setup
-
-Run setup from the repository root, not from inside `PU-P2L/`.
-
-```bash
-conda env create -f environment.yml
-conda activate certifai-experiments
-```
-
-If the environment already exists:
-
-```bash
-conda env update -f environment.yml --prune
-conda activate certifai-experiments
-```
-
-On an A40 server, check that PyTorch sees CUDA before running GPU experiments:
-
-```bash
-python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
-```
-
-All commands assume:
+Run commands from the repository root with:
 
 ```bash
 export PYTHONPATH=PU-P2L
 ```
 
-## Experiment Scale
+## Package Structure
 
-The current runbook uses larger research-sized pools rather than debug-sized
-1000-sample settings:
+```text
+PU-P2L/
+├── pu_p2l/
+│   ├── data.py                         # datasets, label noise, redundancy
+│   ├── model.py                        # MLP and image-model helpers
+│   ├── scores.py                       # selector score functions
+│   ├── runner.py                       # shared P2L/P2L-ES training loop
+│   ├── bounds.py                       # P2L and PAC-Bayes bound utilities
+│   ├── adaptive_generalization_bounds.py
+│   ├── plotting.py                     # plots and report-ready styles
+│   ├── replot.py                       # regenerate plots from CSV outputs
+│   ├── run_boundary.py                 # no-ES bound/risk vs pretrain
+│   ├── run_es_budget_boundary.py       # fixed-ES bound/risk vs pretrain
+│   ├── run_generalization_bounds.py    # P2L/PAC-Bayes/literature bounds
+│   ├── run_time_matched_noise.py       # time-matched pruning comparison
+│   ├── run_pu_r_hyperparameter_ablation.py
+│   ├── run_selection_visualization.py
+│   ├── run_selection_report.py
+│   └── run_statistical_evidence.py
+├── pu_p2l/experiment_setting.md        # final runbook
+└── pu_p2l_algorithm_details.md         # score and algorithm specification
+```
 
-- Binary MNIST, MNIST10, Fashion-MNIST, rotated image datasets: `n_train=5000`
-- CIFAR-10 reduced: `n_train=5000`
-- Two-moons: `n_train=3000`
-- Large sensitivity grids: `n_train=3000`
-- Image test sets: `n_test=10000`
+The top-level `run_*.py` files are thin compatibility wrappers around the module entry points. The recommended invocation is the module form, for example:
 
-The larger pool is important for redundancy, noisy-point, and mode-coverage
-diagnostics; with too few certification samples, the selector pathologies are
-under-populated and the comparison can become uninformative.
+```bash
+python -m pu_p2l.run_boundary --help
+```
 
-## Implemented Methods
+## Core Selectors
 
-Certified selectors, using the P2L/P2L-ES certificate:
+Reportable selectors:
 
-- `MaxLoss`: original P2L max-loss selector.
-- `Marginal`: smallest softmax top-2 margin selector.
-- `EL2N`: deterministic EL2N pruning score inside the P2L loop.
-- `GraNdLast`: deterministic last-layer GraNd approximation inside the P2L loop.
-- `RHO-PretrainRef`: deterministic reducible-loss score using a frozen model
-  trained only on the pretraining split.
-- `PU-R`: clipped loss plus residual novelty minus local redundancy.
-- `PU-R-Vol`: PU-R with deterministic spectral-entropy volume adaptation of novelty and redundancy weights.
-- `PU-R-Manifold`: PU-R with conservative deterministic support-graph manifold adaptation.
-
-Non-certified reference:
-
-- `GREATS`: GREATS-style probe-gradient selector. It is recorded as a practical
-  reference; it is not treated as having a P2L compression certificate.
-
-Ablation selectors:
-
-- `ClippedLoss`
-- `ResidualOnly`
-- `RedundancyOnly`
-- `Loss+Residual`
-- `Loss-Redundancy`
-- `PU-C-style`
-- `Marginal+Residual`
-- `Marginal-Redundancy`
-- `Marginal+Residual-Redundancy`
+- `MaxLoss`: original P2L max-loss acquisition.
+- `PU-R`: clipped loss plus residual novelty minus redundancy.
+- `PU-R-Vol`: PU-R with deterministic spectral-volume adaptation.
+- `PU-R-Manifold`: PU-R with deterministic support-graph manifold refinement.
+- `GREATS`: empirical probe-gradient selector. It is reported as a strong reference, but it is not assigned a P2L compression certificate here.
+- `EL2N`, `GraNdLast`, `RHO-PretrainRef`: data-pruning scores adapted into deterministic P2L acquisition rules for Fashion-MNIST comparisons.
 
 ## Supported Datasets
 
-Use `--dataset-name` with one of:
+The final evaluation uses:
 
-- `synthetic_redundancy_hard`
-- `mnist`: binary MNIST, digits `0` to `4` vs `5` to `9`
-- `mnist10`: ten-class MNIST
-- `fashion_mnist`: ten-class Fashion-MNIST
-- `mode_mnist`: binary `{3,4}` vs `{5,9}` with controllable mode imbalance
-- `boundary_duplicate_mnist`: `mode_mnist` plus redundant boundary-like samples
-- `boundary_duplicate_fashion_mnist`: Fashion-MNIST analogue with redundant boundary-like samples
-- `volume_group_noise_fashion_mnist`: low-volume Fashion-MNIST source groups with group-correlated label noise
-- `manifold_group_noise_fashion_mnist`: rotated Fashion-MNIST source orbits with group-correlated label noise
-- `rotated_mnist`: deterministic fixed-angle rotated MNIST
-- `rotated_fashion_mnist`: deterministic fixed-angle rotated Fashion-MNIST
-- `two_moons`: synthetic two-moons manifold diagnostic
-- `cifar10`: reduced CIFAR-10 subset
+- `mnist`: binary MNIST, digits `0`--`4` vs `5`--`9`.
+- `boundary_duplicate_mnist`: binary MNIST with controlled redundant boundary samples.
+- `fashion_mnist`: ten-class Fashion-MNIST for pruning comparisons.
+- `boundary_duplicate_fashion_mnist`: redundant Fashion-MNIST stress setting.
+- `volume_group_noise_fashion_mnist`: low-volume source-group redundancy.
+- `manifold_group_noise_fashion_mnist`: rotated source-orbit redundancy.
 
-Dataset-specific knobs:
+Additional dataset builders remain available in `data.py` for diagnostics, but the report and audit bundle are based on the datasets above.
 
-- `--mode-imbalance`: Mode-A probability for `mode_mnist` and
-  `boundary_duplicate_mnist`.
-- `--boundary-augmentation`: redundant boundary augmentation multiplier for
-  `boundary_duplicate_mnist`.
-- `--rotation-angles`: fixed rotation domains for rotated datasets.
+## Main Metrics
 
-## Experiment Entry Points
+The CSV outputs include:
 
-- `python -m pu_p2l.run_boundary`: risk, P2L/PAC-Bayes bound, compression size,
-  and runtime vs pretrain fraction.
-- `python -m pu_p2l.run_noise`: risk, compression size, bounds, and selection
-  diagnostics vs label-noise rate.
-- `python -m pu_p2l.run_es_trace`: P2L-ES trajectories vs selection step.
-- `python -m pu_p2l.run_es_budget_boundary`: fixed-ES-budget bounds/risk vs
-  pretrain fraction.
-- `python -m pu_p2l.run_es_budget_noise`: fixed-ES-budget bounds/risk vs noise.
-- `python -m pu_p2l.run_generalization_bounds`: P2L, PAC-Bayes, and external
-  generalization-bound comparison.
-- `python -m pu_p2l.replot`: regenerate plots from existing `results.csv`.
+- `test_error`: ordinary clean classification error.
+- `test_inappropriate_risk`: clean P2L inappropriate-risk event.
+- `compression_size`: selected support size.
+- `remaining_bad`: number of unresolved inappropriate pool examples.
+- `effective_compression_size`: `compression_size + remaining_bad` for ES reporting.
+- `certified_bound`: P2L or P2L-ES compression certificate when the method is admissible.
+- `noise_hit_rate`, `duplicate_hit_rate`, `group_revisit_rate`, and feature redundancy diagnostics.
+- `runtime_sec` and `train_calls`.
 
-## Recorded Metrics
+`test_inappropriate_risk` is the empirical risk notion aligned with the P2L certificate. `test_error` is reported separately for standard ML interpretation.
 
-The CSV outputs record both empirical and certificate-relevant quantities:
+## Default Experimental Settings
 
-- `compression_size`
-- `remaining_bad`
-- `effective_compression_size`
-- `certified_bound`
-- `test_inappropriate_risk`
-- `test_error`
-- `runtime_sec`
-- `train_calls`
-- `noise_hit_rate`
-- `duplicate_hit_rate`
-- `pairwise_feature_cosine`
-- `mean_support_redundancy`
-- `max_support_redundancy`
-- `mean_selected_residual_novelty`
-- `local_redundancy_hit_rate`
-- `residual_redundancy_hit_rate`
-- `strong_redundancy_hit_rate`
-- `mode_entropy`
-- `minority_mode_fraction`
-- `spectral_entropy`
-- `dynamic_mu`
+The final report uses:
 
-`test_inappropriate_risk` is the main empirical counterpart of the P2L
-certificate. `test_error` is still recorded for standard ML interpretation.
+- `n_train=5000`, `n_test=10000`.
+- `model_name=mnist_fcn`: fully connected `784-600-600-600-C` network.
+- SGD with momentum `0.95`, learning rate `0.01`, dropout `0.2`.
+- `pretrain_training_mode=support`.
+- P2L threshold `gamma=-log(0.5)`.
+- P2L certificate failure probability `delta=0.035` (`96.5%` confidence).
+- MNIST support cap `800`; Fashion-MNIST support cap `1000`.
 
-## PAC-Bayes
+The exact settings for each reported result are recorded in `../experiment-results/configs/` and summarized in `../experiment-results/README.md`.
 
-PAC-Bayes is enabled for image-style datasets when `--pac-bayes-samples > 0`.
-The default experiment commands use a Gaussian posterior over the classifier
-head:
+## Reproducibility
 
-```bash
---pac-bayes-samples 50 --pac-bayes-train-epochs 1 --pac-bayes-scope head
+Use:
+
+```text
+PU-P2L/pu_p2l/experiment_setting.md
 ```
 
-PAC-Bayes is intentionally disabled for `synthetic_redundancy_hard`, where the
-current stochastic-posterior baseline was not meaningful.
+for the final command list. Use:
+
+```text
+experiment-results/README.md
+```
+
+to map each report figure/table to the copied audit artifact and the command that regenerates it.
+
+Example:
+
+```bash
+python -m pu_p2l.run_es_budget_boundary \
+  --output-dir results/PU-R/MNIST/es100/boundary_duplicate_noise_0p3_aug5 \
+  --dataset-name boundary_duplicate_mnist \
+  $MNIST_COMMON \
+  --seeds $SEEDS5 \
+  --noise-rates 0.3 \
+  --pretrain-fractions $PRETRAIN_GRID \
+  --es-budgets 100 \
+  --methods MaxLoss PU-R GREATS \
+  --n-train $N_MNIST \
+  --n-test $N_TEST \
+  --max-total-support $SUPPORT_MNIST \
+  --mode-imbalance 0.85 \
+  --boundary-augmentation 5
+```
 
 ## Plotting
 
-All plots use connected standard-error bands rather than independent error bars.
-For ES traces, the full-step plot shows the ES P2L bound only to avoid clutter;
-the first-100-step plot includes risk and bound. The trace runner also plots:
-
-- `remaining_bad` vs step
-- `effective_compression_size` vs step
-- `spectral_entropy` vs step
-- `dynamic_mu` vs step
-
-To regenerate plots after changing style:
+Plotting uses connected standard-error bands. To regenerate plots from existing CSV outputs:
 
 ```bash
-PYTHONPATH=PU-P2L python -m pu_p2l.replot \
-  --results-dir results/experiments/pu_r/binary_mnist/core_boundary \
-  --kind boundary
+python -m pu_p2l.replot \
+  --results-dir <result-folder> \
+  --kind <boundary|es_budget_boundary|generalization_bounds|noise|es_trace>
 ```
 
-Valid `--kind` values are `boundary`, `noise`, `es_trace`,
-`es_budget_boundary`, `es_budget_noise`, and `generalization_bounds`.
-
-## Runbook
-
-Run commands one by one from:
-
-```text
-PU-P2L/experiment_commands.md
-```
-
-The raw CSV and `summary.csv` files contain the runtime and compression fields
-needed for result tables.
+The report-ready plot and table files are copied into `../experiment-results/`.

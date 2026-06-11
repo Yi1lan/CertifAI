@@ -42,6 +42,13 @@ TABLE_METRICS = [
     ("certified_bound", "P2L-ES bound"),
 ]
 
+NEW_SELECTION_METRICS = [
+    ("noise_hit_rate", "Noise-hit"),
+    ("duplicate_hit_rate", "Duplicate-hit"),
+    ("group_revisit_rate", "Group revisit"),
+    ("unique_group_fraction", "Unique group fraction"),
+]
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -90,6 +97,68 @@ def summarize_results(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
         out: dict[str, Any] = {field: key[idx] for idx, field in enumerate(GROUP_FIELDS)}
         out["n"] = len(group)
         for metric in METRICS:
+            values = finite([to_float(row, metric) for row in group])
+            if values:
+                arr = np.asarray(values, dtype=np.float64)
+                out[f"{metric}_mean"] = float(np.mean(arr))
+                out[f"{metric}_std"] = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
+            else:
+                out[f"{metric}_mean"] = ""
+                out[f"{metric}_std"] = ""
+        summary.append(out)
+    return summary
+
+
+def group_revisit_rate(group_ids: list[int]) -> float:
+    valid = np.asarray([group_id for group_id in group_ids if group_id >= 0], dtype=np.int64)
+    if len(valid) == 0:
+        return 0.0
+    _, counts = np.unique(valid, return_counts=True)
+    return float(np.sum(np.maximum(counts - 1, 0)) / len(valid))
+
+
+def unique_group_fraction(group_ids: list[int]) -> float:
+    valid = np.asarray([group_id for group_id in group_ids if group_id >= 0], dtype=np.int64)
+    if len(valid) == 0:
+        return 0.0
+    return float(len(np.unique(valid)) / len(valid))
+
+
+def new_selection_seed_rows(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
+    seed_group_fields = [*GROUP_FIELDS, "seed"]
+    groups: dict[tuple[str, ...], list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        if int(float(row.get("initial_support", "0") or 0)) == 1:
+            continue
+        key = tuple(str(row.get(field, "")) for field in seed_group_fields)
+        groups[key].append(row)
+
+    output: list[dict[str, Any]] = []
+    for key, group in sorted(groups.items(), key=lambda item: item[0]):
+        group_ids = [int(float(row.get("group_id", "-1") or -1)) for row in group]
+        output.append(
+            {
+                **{field: key[idx] for idx, field in enumerate(seed_group_fields)},
+                "n_selected": len(group),
+                "noise_hit_rate": float(np.mean([to_float(row, "is_noisy") for row in group])),
+                "duplicate_hit_rate": float(np.mean([to_float(row, "is_duplicate") for row in group])),
+                "group_revisit_rate": group_revisit_rate(group_ids),
+                "unique_group_fraction": unique_group_fraction(group_ids),
+            }
+        )
+    return output
+
+
+def summarize_new_selection(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        groups[tuple(str(row.get(field, "")) for field in GROUP_FIELDS)].append(row)
+
+    summary: list[dict[str, Any]] = []
+    for key, group in sorted(groups.items(), key=lambda item: item[0]):
+        out: dict[str, Any] = {field: key[idx] for idx, field in enumerate(GROUP_FIELDS)}
+        out["n"] = len(group)
+        for metric, _ in NEW_SELECTION_METRICS:
             values = finite([to_float(row, metric) for row in group])
             if values:
                 arr = np.asarray(values, dtype=np.float64)
@@ -239,6 +308,25 @@ def write_latex_table(path: Path, summary: list[dict[str, Any]], methods: list[s
         handle.write("\\end{tabular}\\n")
 
 
+def write_new_selection_latex_table(path: Path, summary: list[dict[str, Any]], methods: list[str]) -> None:
+    ordered = sorted(
+        summary,
+        key=lambda row: (float(row["budget"]), methods.index(row["method"]) if row["method"] in methods else 999),
+    )
+    with path.open("w") as handle:
+        handle.write("\\begin{tabular}{ll" + "c" * len(NEW_SELECTION_METRICS) + "}\\n")
+        handle.write("\\toprule\\n")
+        headers = ["Budget", "Method", *[label for _, label in NEW_SELECTION_METRICS]]
+        handle.write(" & ".join(headers) + r" \\" + "\n")
+        handle.write("\\midrule\\n")
+        for row in ordered:
+            cells = [str(int(float(row["budget"]))), str(row["method"])]
+            cells.extend(fmt_mean_std(row, metric) for metric, _ in NEW_SELECTION_METRICS)
+            handle.write(" & ".join(cells) + r" \\" + "\n")
+        handle.write("\\bottomrule\\n")
+        handle.write("\\end{tabular}\\n")
+
+
 def main() -> None:
     args = parse_args()
     input_dir = Path(args.input_dir)
@@ -254,6 +342,15 @@ def main() -> None:
     summary = summarize_results(rows)
     write_csv(output_dir / "selection_mean_sd.csv", summary_fields(summary), summary)
     write_latex_table(output_dir / "selection_mean_sd_table.tex", summary, methods)
+
+    selected_path = input_dir / "selected_points.csv"
+    if selected_path.exists():
+        selected_rows = read_rows(selected_path)
+        new_rows = new_selection_seed_rows(selected_rows)
+        new_summary = summarize_new_selection(new_rows)
+        write_csv(output_dir / "new_selection_seed_metrics.csv", summary_fields(new_rows), new_rows)
+        write_csv(output_dir / "new_selection_mean_sd.csv", summary_fields(new_summary), new_summary)
+        write_new_selection_latex_table(output_dir / "new_selection_mean_sd_table.tex", new_summary, methods)
 
     examples = choose_best_examples(
         rows,

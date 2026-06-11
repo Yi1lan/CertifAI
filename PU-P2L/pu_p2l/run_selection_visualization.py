@@ -495,14 +495,28 @@ def plot_selection_group(
         indices = rng.choice(len(pool_rows), size=background_limit, replace=False)
         background_rows = [pool_rows[int(idx)] for idx in indices]
 
-    fig, axes = plt.subplots(1, len(methods), figsize=(4.6 * len(methods), 4.4), sharex=True, sharey=True)
-    if len(methods) == 1:
-        axes = [axes]
+    n_methods = len(methods)
+    if n_methods <= 2:
+        ncols = n_methods
+    else:
+        ncols = math.ceil(math.sqrt(n_methods))
+    nrows = math.ceil(n_methods / ncols)
+    fig, axes_grid = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4.4 * ncols, 4.1 * nrows),
+        sharex=True,
+        sharey=True,
+    )
+    axes = np.asarray(axes_grid).reshape(-1)
+    plot_axes = axes[:n_methods]
+    for ax in axes[n_methods:]:
+        ax.set_visible(False)
     label_values = sorted({int(row["true_y"]) for row in background_rows})
     cmap = plt.get_cmap("tab10")
     summary_lookup = {(row["method"], int(row["budget"])): row for row in summary_rows}
 
-    for ax, method in zip(axes, methods):
+    for ax, method in zip(plot_axes, methods):
         for label in label_values:
             label_rows = [row for row in background_rows if int(row["true_y"]) == label]
             ax.scatter(
@@ -572,8 +586,9 @@ def plot_selection_group(
         ax.set_title(subtitle, fontsize=10)
         ax.grid(alpha=0.18)
 
-    axes[0].set_ylabel("Projection dimension 2")
-    for ax in axes:
+    for idx, ax in enumerate(plot_axes):
+        if idx % ncols == 0:
+            ax.set_ylabel("Projection dimension 2")
         ax.set_xlabel("Projection dimension 1")
 
     legend_items = [
@@ -591,7 +606,7 @@ def plot_selection_group(
             markersize=7,
         ),
     ]
-    axes[-1].legend(handles=legend_items, loc="best", fontsize=8)
+    plot_axes[-1].legend(handles=legend_items, loc="best", fontsize=8)
     fig.suptitle(title, fontsize=12)
     fig.tight_layout()
     fig.savefig(path, dpi=200)
