@@ -85,10 +85,12 @@ The final report uses:
 - `n_train=5000`, `n_test=10000`.
 - `model_name=mnist_fcn`: fully connected `784-600-600-600-C` network.
 - SGD with momentum `0.95`, learning rate `0.01`, dropout `0.2`.
-- `pretrain_training_mode=support`.
+- `pretrain_training_mode=warm_start` for the main reported result bundle.
 - P2L threshold `gamma=-log(0.5)`.
 - P2L certificate failure probability `delta=0.035` (`96.5%` confidence).
 - MNIST support cap `800`; Fashion-MNIST support cap `1000`.
+
+`pretrain_training_mode=support` is available for original-P2L-aligned reruns, where pretrain data is replayed during iterative support training but is not counted in the compression size.
 
 The exact settings for each reported result are recorded in `../experiment-results/configs/` and summarized in `../experiment-results/README.md`.
 

@@ -20,10 +20,13 @@ export N_TEST=10000
 export SUPPORT_MNIST=800
 export SUPPORT_IMAGE=1000
 export PRETRAIN_GRID="0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8"
+export PRETRAIN_TRAINING_MODE=warm_start
 
-export MNIST_COMMON="--data-dir $DATA_DIR --download-data --device $DEVICE --model-name mnist_fcn --optimizer sgd --momentum 0.95 --batch-size 60000 --inference-batch-size 1024 --pretrain-training-mode support --pretrain-epochs 20 --p2l-epochs-per-iter 5 --pretrain-lr 0.01 --p2l-lr 0.01 --dropout-prob 0.2 --initial-per-class 2 --mu 1.0 --global-redundancy-weight 1.0 --residual-rank 0 --residual-tol 1e-6 --pac-bayes-samples 0"
+export MNIST_COMMON="--data-dir $DATA_DIR --download-data --device $DEVICE --model-name mnist_fcn --optimizer sgd --momentum 0.95 --batch-size 60000 --inference-batch-size 1024 --pretrain-training-mode $PRETRAIN_TRAINING_MODE --pretrain-epochs 20 --p2l-epochs-per-iter 5 --pretrain-lr 0.01 --p2l-lr 0.01 --dropout-prob 0.2 --initial-per-class 2 --mu 1.0 --global-redundancy-weight 1.0 --residual-rank 0 --residual-tol 1e-6 --pac-bayes-samples 0"
 export IMAGE_COMMON="$MNIST_COMMON"
 ```
+
+The main reported result bundle uses `PRETRAIN_TRAINING_MODE=warm_start`, the historical default. In this mode, the pretrain subset is used once to warm-start the model before the P2L loop, is removed from the certification pool, and is not used again in the iterative support-training updates. Set `PRETRAIN_TRAINING_MODE=support` for original-P2L-aligned reruns where the pretrain subset is replayed during iterative support training without being charged to the reported compression size.
 
 Unless overridden, P2L and P2L-ES certificates use `--delta 0.035`, corresponding to confidence `96.5%`.
 
