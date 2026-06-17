@@ -60,3 +60,7 @@ temp/
 
 # Local files
 data/
+
+# Nested project repositories
+/Imperial-College-Individual-Project-Final-Report-Yanli-Wang/
+/CertifAI-Presentation/
